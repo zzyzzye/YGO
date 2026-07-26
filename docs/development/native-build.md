@@ -1,71 +1,80 @@
-# Native build
+# 原生模块构建
 
-The project uses a Godot 4.6 GDExtension to expose the real `ygopro-core`
-duel lifecycle to GDScript.
+项目通过 Godot 4.6 GDExtension 向 GDScript 暴露真实 `ygopro-core` 决斗生命周期、
+卡片数据库与 ProjectIgnis Lua 规则加载器。
 
-## Requirements
+## 环境要求
 
-- macOS on Apple Silicon
-- Godot 4.6.x at `/Applications/Godot.app`
-- CMake 3.24 or newer
-- An Apple Clang toolchain
+- Apple Silicon Mac；
+- `/Applications/Godot.app` 中安装 Godot 4.6.x；
+- CMake 3.24 或更高版本；
+- Apple Clang 工具链。
 
-## Clone
+## 初始化依赖
 
-Initialize every pinned dependency, including the Lua submodule nested inside
-`ygopro-core`:
+克隆仓库后初始化全部锁定的子模块，包括 `ygopro-core` 内嵌的 Lua：
 
 ```bash
 git submodule update --init --recursive
 ```
 
-`third_party/godot-cpp` is intentionally pinned to its Godot 4.6-stable API
-commit. Do not update it to `master` without also upgrading the project and
-installed Godot version.
+`third_party/godot-cpp` 固定在兼容 Godot 4.6 的提交。除非同时升级项目与本机 Godot，
+否则不要把它切换到 `master`。依赖版本和许可证见 `LICENSES/THIRD_PARTY.md`。
 
-## Build and test
+## 构建与测试
 
-From the repository root:
+在仓库根目录执行：
 
 ```bash
 ./scripts/build_native.sh
 ```
 
-The script configures a Debug build in `build/native`, builds the C++ wrapper
-and GDExtension, and runs the native lifecycle test. The resulting library is:
+脚本会在 `build/native` 配置 Debug 构建，编译 C++ 数据层、OCGCore 包装和 GDExtension，
+随后运行全部原生测试。生成的动态库为：
 
 ```text
 bin/macos/libygo_core.dylib
 ```
 
-## Run
-
-Open `project.godot` in Godot, or run:
+需要对本机完整素材做严格集成验证时，显式提供资源目录：
 
 ```bash
-/Applications/Godot.app/Contents/MacOS/Godot --path /absolute/path/to/YGO
+YGO_TEST_ASSET_ROOT="$PWD" \
+YGO_TEST_SCRIPT_ROOT="$PWD/third_party/CardScripts" \
+ctest --test-dir build/native --output-on-failure
 ```
 
-The diagnostic screen should report the Godot version, OCGCore version, and
-`duel lifecycle OK`.
+未提供这两个环境变量时，依赖大型本地素材的用例会跳过，轻量单元测试仍正常运行。
 
-For a headless smoke test:
+## 启动 Godot
+
+用 Godot 打开 `project.godot`，或执行：
+
+```bash
+/Applications/Godot.app/Contents/MacOS/Godot --path "$PWD"
+```
+
+诊断界面应显示 Godot 与 OCGCore 版本、正式卡片数量、缓存状态、青眼白龙查询结果和
+Lua 规则连接状态。
+
+无头冒烟测试：
 
 ```bash
 /Applications/Godot.app/Contents/MacOS/Godot \
   --headless \
-  --path /absolute/path/to/YGO \
+  --path "$PWD" \
   --quit-after 2
 ```
 
-## Local card assets
+## 本地素材与缓存
 
-Large card data and artwork remain local and are ignored by Git:
+大型卡片数据、卡图、工具和缓存保留在项目目录内，但由 Git 忽略：
 
 - `data/cards.json`
 - `images/`
+- `.cache/`
 - `vendor/`
 - `tools/`
 
-Their `.gdignore` marker files are tracked so Godot does not import or scan
-those large source trees.
+对应目录的 `.gdignore` 标记会阻止 Godot 导入或扫描大型源数据。卡片字段、交集规则、
+缓存失效方式和 Lua 白名单详见 `docs/development/card-data.md`。

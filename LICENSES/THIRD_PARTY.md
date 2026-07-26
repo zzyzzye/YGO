@@ -6,7 +6,7 @@ below are part of this repository's Git tree and can be verified with
 
 | Dependency | Repository | Pinned commit | License status |
 | --- | --- | --- | --- |
-| godot-cpp | https://github.com/godotengine/godot-cpp | `9c7567d2a26243dbbfa87333fc0593e6f4f4bdcf` | MIT (`LICENSE.md`) |
+| godot-cpp | https://github.com/godotengine/godot-cpp | `58d1de720b8ffe9f8ffcdfe3a85148582cfd2e74` | MIT (`LICENSE.md`) |
 | ygopro-core | https://github.com/edo9300/ygopro-core | `0764db0c75b3d1d574880d365aa3695ab1f13b43` | AGPL-3.0-or-later (`LICENSE`, `COPYING`) |
 | Lua | https://github.com/lua/lua | `6e22fedb74cf0c9b6656e9fce8b7331db847c605` | Lua license in the upstream source |
 | CardScripts | https://github.com/ProjectIgnis/CardScripts | `6b150b8471fbd713ad786ee3d8c1384a471c45f1` | AGPL-3.0-or-later (`COPYING`) |
