@@ -1,6 +1,10 @@
 #pragma once
 
+#include "ygo/ocg_card_data_adapter.hpp"
+#include "ygo/official_script_loader.hpp"
+
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <utility>
 
@@ -14,7 +18,9 @@ struct CreateResult {
 
 class DuelSession final {
 public:
-	DuelSession() = default;
+	DuelSession(
+			std::shared_ptr<const CardDatabase> database,
+			std::shared_ptr<OfficialScriptLoader> scripts);
 	~DuelSession();
 
 	DuelSession(const DuelSession &) = delete;
@@ -26,6 +32,9 @@ public:
 	[[nodiscard]] bool is_active() const noexcept;
 
 private:
+	std::shared_ptr<const CardDatabase> database_;
+	std::shared_ptr<OfficialScriptLoader> scripts_;
+	OcgCardDataAdapter card_data_adapter_;
 	void *duel_ = nullptr;
 };
 

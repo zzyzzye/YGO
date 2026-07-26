@@ -87,19 +87,35 @@ set_source_files_properties("${OCGCORE_DIR}/processor_visit.cpp" PROPERTIES
 
 add_library(ygo_duel_session STATIC src/duel_session.cpp)
 target_include_directories(ygo_duel_session PUBLIC include)
-target_link_libraries(ygo_duel_session PUBLIC ocgcore)
+target_link_libraries(ygo_duel_session PUBLIC
+	ocgcore
+	ygo_ocg_card_data_adapter
+	ygo_official_script_loader
+)
 
 add_library(ygo_official_script_loader STATIC src/official_script_loader.cpp)
 target_include_directories(ygo_official_script_loader PUBLIC include)
 target_link_libraries(ygo_official_script_loader PUBLIC ocgcore)
+
+add_library(ygo_ocg_card_data_adapter STATIC src/ocg_card_data_adapter.cpp)
+target_include_directories(ygo_ocg_card_data_adapter PUBLIC include)
+target_link_libraries(ygo_ocg_card_data_adapter PUBLIC ygo_card_database ocgcore)
 
 add_executable(test_official_script_loader tests/test_official_script_loader.cpp)
 target_include_directories(test_official_script_loader PRIVATE tests)
 target_link_libraries(test_official_script_loader PRIVATE ygo_official_script_loader)
 add_test(NAME official_script_loader COMMAND test_official_script_loader)
 
+add_executable(test_ocg_card_data_adapter tests/test_ocg_card_data_adapter.cpp)
+target_link_libraries(test_ocg_card_data_adapter PRIVATE ygo_ocg_card_data_adapter)
+add_test(NAME ocg_card_data_adapter COMMAND test_ocg_card_data_adapter)
+
 add_executable(test_duel_session tests/test_duel_session.cpp)
-target_link_libraries(test_duel_session PRIVATE ygo_duel_session)
+target_include_directories(test_duel_session PRIVATE tests)
+target_link_libraries(test_duel_session PRIVATE
+	ygo_duel_session
+	ygo_card_repository
+)
 
 add_test(NAME duel_session_lifecycle COMMAND test_duel_session)
 

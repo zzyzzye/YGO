@@ -5,8 +5,7 @@
 
 namespace ygo {
 
-YgoCoreBridge::YgoCoreBridge() :
-		session_(std::make_unique<DuelSession>()) {
+YgoCoreBridge::YgoCoreBridge() {
 }
 
 godot::Dictionary YgoCoreBridge::get_core_version() const {
@@ -18,6 +17,13 @@ godot::Dictionary YgoCoreBridge::get_core_version() const {
 }
 
 godot::Dictionary YgoCoreBridge::create_duel(std::int64_t seed) {
+	if (!session_) {
+		godot::Dictionary response;
+		response["ok"] = false;
+		response["status"] = -1;
+		response["message"] = godot::String("卡片数据库尚未初始化");
+		return response;
+	}
 	const CreateResult result = session_->create(static_cast<std::uint64_t>(seed));
 	godot::Dictionary response;
 	response["ok"] = result.ok;
@@ -27,11 +33,13 @@ godot::Dictionary YgoCoreBridge::create_duel(std::int64_t seed) {
 }
 
 void YgoCoreBridge::destroy_duel() {
-	session_->destroy();
+	if (session_) {
+		session_->destroy();
+	}
 }
 
 bool YgoCoreBridge::is_duel_active() const {
-	return session_->is_active();
+	return session_ && session_->is_active();
 }
 
 void YgoCoreBridge::_bind_methods() {
