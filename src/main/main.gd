@@ -5,4 +5,3 @@ extends Control
 
 func _ready() -> void:
 	status.text = "Native bridge not loaded"
-
