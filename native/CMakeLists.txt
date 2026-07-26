@@ -8,6 +8,16 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 enable_testing()
 
+add_subdirectory(
+	"${CMAKE_CURRENT_SOURCE_DIR}/../third_party/json"
+	"${CMAKE_CURRENT_BINARY_DIR}/json"
+	EXCLUDE_FROM_ALL
+)
+
+add_executable(test_card_record tests/test_card_record.cpp)
+target_include_directories(test_card_record PRIVATE include)
+add_test(NAME card_record COMMAND test_card_record)
+
 set(OCGCORE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../third_party/ygopro-core")
 set(LUA_DIR "${OCGCORE_DIR}/lua")
 set(LUA_SRC_DIR "${LUA_DIR}/src")
