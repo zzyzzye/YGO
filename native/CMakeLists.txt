@@ -26,6 +26,10 @@ add_library(ygo_card_cache STATIC src/card_cache.cpp)
 target_include_directories(ygo_card_cache PUBLIC include)
 target_link_libraries(ygo_card_cache PUBLIC ygo_card_database)
 
+add_library(ygo_card_repository STATIC src/card_repository.cpp)
+target_include_directories(ygo_card_repository PUBLIC include)
+target_link_libraries(ygo_card_repository PUBLIC ygo_card_cache)
+
 add_executable(test_card_database tests/test_card_database.cpp)
 target_include_directories(test_card_database PRIVATE tests)
 target_link_libraries(test_card_database PRIVATE ygo_card_database)
@@ -35,6 +39,11 @@ add_executable(test_card_cache tests/test_card_cache.cpp)
 target_include_directories(test_card_cache PRIVATE tests)
 target_link_libraries(test_card_cache PRIVATE ygo_card_cache)
 add_test(NAME card_cache COMMAND test_card_cache)
+
+add_executable(test_card_repository tests/test_card_repository.cpp)
+target_include_directories(test_card_repository PRIVATE tests)
+target_link_libraries(test_card_repository PRIVATE ygo_card_repository)
+add_test(NAME card_repository COMMAND test_card_repository)
 
 set(OCGCORE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../third_party/ygopro-core")
 set(LUA_DIR "${OCGCORE_DIR}/lua")
