@@ -171,6 +171,16 @@ CardDatabaseLoadResult CardDatabase::load_json_intersection(
 	return result;
 }
 
+std::shared_ptr<CardDatabase> CardDatabase::from_records(
+		std::map<std::uint32_t, CardRecord> records,
+		CardDatabaseStats stats) {
+	auto database = std::make_shared<CardDatabase>();
+	database->records_ = std::move(records);
+	database->stats_ = stats;
+	database->stats_.accepted_records = database->records_.size();
+	return database;
+}
+
 const CardRecord *CardDatabase::find(std::uint32_t id) const noexcept {
 	const auto iterator = records_.find(id);
 	return iterator == records_.end() ? nullptr : &iterator->second;

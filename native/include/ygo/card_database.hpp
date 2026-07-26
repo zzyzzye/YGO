@@ -32,6 +32,9 @@ public:
 	static CardDatabaseLoadResult load_json_intersection(
 			const std::filesystem::path &cards_json,
 			const std::filesystem::path &images_directory);
+	static std::shared_ptr<CardDatabase> from_records(
+			std::map<std::uint32_t, CardRecord> records,
+			CardDatabaseStats stats);
 
 	[[nodiscard]] const CardRecord *find(std::uint32_t id) const noexcept;
 	[[nodiscard]] std::size_t size() const noexcept;
