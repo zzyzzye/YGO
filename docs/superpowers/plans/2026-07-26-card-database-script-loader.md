@@ -679,6 +679,7 @@ git commit \
 - Consumes: CardScripts 根路径、OCGCore 请求名（如 `c89631139.lua` 或 `proc_link.lua`）、`OCG_Duel`。
 - Produces:
   - `OfficialScriptLoader::validate() -> ScriptLoadResult`
+  - `OfficialScriptLoader::read_requested(std::string_view) -> ScriptLoadResult`
   - `OfficialScriptLoader::load_requested(OCG_Duel, std::string_view) -> int`
   - `OfficialScriptLoader::load_bootstrap(OCG_Duel) -> ScriptLoadResult`
 
@@ -694,19 +695,20 @@ official/c89631139.lua
 unofficial/c1.lua
 ```
 
-断言：
+通过正式的读取接口断言：
 
 ```cpp
-assert(loader.resolve_for_test("constant.lua") == root / "constant.lua");
-assert(loader.resolve_for_test("proc_link.lua") == root / "proc_link.lua");
-assert(loader.resolve_for_test("c89631139.lua") == root / "official/c89631139.lua");
-assert(!loader.resolve_for_test("../constant.lua").has_value());
-assert(!loader.resolve_for_test("/tmp/c1.lua").has_value());
-assert(!loader.resolve_for_test("unofficial/c1.lua").has_value());
-assert(!loader.resolve_for_test("official/../unofficial/c1.lua").has_value());
+assert(loader.read_requested("constant.lua").bytes == "CONST");
+assert(loader.read_requested("proc_link.lua").bytes == "LINK");
+assert(loader.read_requested("c89631139.lua").bytes == "BLUE_EYES");
+assert(!loader.read_requested("../constant.lua").ok);
+assert(!loader.read_requested("/tmp/c1.lua").ok);
+assert(!loader.read_requested("unofficial/c1.lua").ok);
+assert(!loader.read_requested("official/../unofficial/c1.lua").ok);
 ```
 
-`resolve_for_test` 仅在测试构建宏下暴露，生产接口不得返回任意文件路径。
+测试直接验证生产读取行为，不增加测试专用方法，也不向调用方暴露任意
+文件系统路径。
 
 - [ ] **Step 2: 运行测试确认失败**
 

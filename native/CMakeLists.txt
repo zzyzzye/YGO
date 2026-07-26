@@ -89,6 +89,15 @@ add_library(ygo_duel_session STATIC src/duel_session.cpp)
 target_include_directories(ygo_duel_session PUBLIC include)
 target_link_libraries(ygo_duel_session PUBLIC ocgcore)
 
+add_library(ygo_official_script_loader STATIC src/official_script_loader.cpp)
+target_include_directories(ygo_official_script_loader PUBLIC include)
+target_link_libraries(ygo_official_script_loader PUBLIC ocgcore)
+
+add_executable(test_official_script_loader tests/test_official_script_loader.cpp)
+target_include_directories(test_official_script_loader PRIVATE tests)
+target_link_libraries(test_official_script_loader PRIVATE ygo_official_script_loader)
+add_test(NAME official_script_loader COMMAND test_official_script_loader)
+
 add_executable(test_duel_session tests/test_duel_session.cpp)
 target_link_libraries(test_duel_session PRIVATE ygo_duel_session)
 
