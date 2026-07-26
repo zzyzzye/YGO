@@ -1,0 +1,36 @@
+# Godot generated files
+.godot/
+*.translation
+export.cfg
+
+# Native build outputs
+build/
+bin/
+obj/
+cmake-build-*/
+.cache/
+compile_commands.json
+
+# Platform and editor metadata
+.DS_Store
+._*
+*.swp
+*.tmp
+.worktrees/
+
+# External card data and artwork
+/data/
+/images/
+
+# Third-party source and local development tooling
+/vendor/
+/tools/
+
+# Node dependencies and logs
+node_modules/
+npm-debug.log*
+
+# Local runtime data
+/logs/
+/replays/
+/saves/
