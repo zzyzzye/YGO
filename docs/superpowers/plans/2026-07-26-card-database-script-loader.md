@@ -47,6 +47,10 @@ native/include/ygo/official_script_loader.hpp
 native/src/official_script_loader.cpp
     规范化 OCGCore 脚本名、限制允许目录、读取脚本并调用 OCG_LoadScript。
 
+native/include/ygo/ocg_card_data_adapter.hpp
+native/src/ocg_card_data_adapter.cpp
+    把 CardRecord 转换为 OCG_CardData，并管理 setcodes 终止数组的生命周期。
+
 native/include/ygo/duel_session.hpp
 native/src/duel_session.cpp
     使用真实 CardDatabase 和 OfficialScriptLoader 回调管理 OCGCore 句柄。
@@ -791,8 +795,11 @@ git commit \
 ### Task 6: 把真实数据库与脚本回调接入 DuelSession
 
 **Files:**
+- Create: `native/include/ygo/ocg_card_data_adapter.hpp`
+- Create: `native/src/ocg_card_data_adapter.cpp`
 - Modify: `native/include/ygo/duel_session.hpp`
 - Modify: `native/src/duel_session.cpp`
+- Create: `native/tests/test_ocg_card_data_adapter.cpp`
 - Modify: `native/tests/test_duel_session.cpp`
 - Modify: `native/CMakeLists.txt`
 
@@ -801,11 +808,71 @@ git commit \
   - `std::shared_ptr<const CardDatabase>`
   - `std::shared_ptr<OfficialScriptLoader>`
 - Produces:
+  - `OcgCardDataAdapter::read(std::uint32_t, OCG_CardData *)`
+  - `OcgCardDataAdapter::done(OCG_CardData *)`
   - `DuelSession(database, scripts)`
   - 真实 `OCG_DataReader`、`OCG_DataReaderDone`、`OCG_ScriptReader`
   - `CreateResult::message` 中文化
 
-- [ ] **Step 1: 修改生命周期测试，要求真实依赖**
+- [ ] **Step 1: 写入字段适配器失败测试**
+
+`native/tests/test_ocg_card_data_adapter.cpp` 使用真实 `CardDatabase` 记录：
+
+```cpp
+auto database = database_with_blue_eyes();
+ygo::OcgCardDataAdapter adapter(database);
+OCG_CardData data{};
+
+adapter.read(89631139, &data);
+assert(data.code == 89631139);
+assert(data.attack == 3000);
+assert(data.defense == 2500);
+assert(data.setcodes != nullptr);
+assert(data.setcodes[0] == 0x10f3);
+assert(data.setcodes[1] == 0);
+
+adapter.done(&data);
+assert(data.setcodes == nullptr);
+```
+
+再读取不存在的卡号，断言结构体除请求 `code` 外为零且不会崩溃。
+
+- [ ] **Step 2: 运行测试确认适配器不存在**
+
+```bash
+cmake --build build/native --target test_ocg_card_data_adapter -j4
+```
+
+预期：编译失败，提示 `ocg_card_data_adapter.hpp` 或类型尚不存在。
+
+- [ ] **Step 3: 实现正式字段适配组件**
+
+`OcgCardDataAdapter` 是生产组件，不包含任何测试专用接口。它保存
+`std::shared_ptr<const CardDatabase>` 和每个决斗实例独占的
+`std::vector<std::uint16_t> callback_setcodes_`。
+
+`read()` 按以下流程：
+
+1. 查找 `code`。
+2. 未找到时返回全零结构并把 `code` 保留为请求值。
+3. 找到时逐字段填充 `OCG_CardData`。
+4. 把记录的 `setcodes` 复制到 `callback_setcodes_` 并追加终止零。
+5. 把 `data->setcodes` 指向该数组。
+
+`done()` 把传入结构的 `setcodes` 指针清空，并清理临时数组。中文注释
+明确当前 OCGCore 在 `card_data` 构造期间同步复制该数组，完成回调后不
+得继续使用指针。
+
+- [ ] **Step 4: 运行字段适配器测试**
+
+```bash
+cmake --build build/native --target test_ocg_card_data_adapter -j4
+./build/native/test_ocg_card_data_adapter
+```
+
+预期：退出码 0。
+
+- [ ] **Step 5: 修改生命周期测试，要求真实依赖**
 
 测试先创建最小数据库和脚本夹具：
 
@@ -822,16 +889,7 @@ session.destroy();
 assert(!session.is_active());
 ```
 
-再增加卡片回调适配测试：
-
-```cpp
-const auto adapted = session.card_data_for_test(89631139);
-assert(adapted.code == 89631139);
-assert(adapted.attack == 3000);
-assert(adapted.setcodes != nullptr);
-```
-
-- [ ] **Step 2: 运行测试确认旧构造接口失败**
+- [ ] **Step 6: 运行测试确认旧构造接口失败**
 
 ```bash
 cmake --build build/native --target test_duel_session -j4
@@ -840,31 +898,22 @@ cmake --build build/native --target test_duel_session -j4
 
 预期：编译失败，提示新构造函数或测试适配接口不存在。
 
-- [ ] **Step 3: 实现共享所有权和真实卡片回调**
+- [ ] **Step 7: 实现共享所有权和真实卡片回调**
 
 `DuelSession` 保存：
 
 ```cpp
 std::shared_ptr<const CardDatabase> database_;
 std::shared_ptr<OfficialScriptLoader> scripts_;
-std::vector<std::uint16_t> callback_setcodes_;
+OcgCardDataAdapter card_data_adapter_;
 ```
 
-卡片回调流程：
+`cardReader` 和 `cardReaderDone` 只负责把 C 回调转发到
+`OcgCardDataAdapter::read/done`。为避免未来并发误用，回调和创建/处理
+决斗保持同一线程；后续若引入并行决斗，每个 `DuelSession` 独占自己的
+适配器和回调缓冲区。
 
-1. 查找 `code`。
-2. 未找到时返回全零结构并把 `code` 保留为请求值。
-3. 找到时逐字段填充 `OCG_CardData`。
-4. 把记录的 `setcodes` 复制到 `callback_setcodes_` 并追加终止零。
-5. 把 `data->setcodes` 指向该临时数组。
-6. `cardReaderDone` 把指针清空并清理临时数组。
-
-中文注释明确：当前 OCGCore 在 `card_data` 构造期间同步复制数组；
-`cardReaderDone` 后不得再使用该指针。为避免未来并发误用，回调和创建/
-处理决斗保持同一线程；后续若引入并行决斗，每个 `DuelSession` 独占自己
-的回调缓冲区。
-
-- [ ] **Step 4: 接入脚本回调与基础脚本**
+- [ ] **Step 8: 接入脚本回调与基础脚本**
 
 `options.scriptReader` 转发到 `OfficialScriptLoader::load_requested`。
 `OCG_CreateDuel` 成功后立即调用 `load_bootstrap`；基础脚本失败时销毁
@@ -879,7 +928,7 @@ case OCG_DUEL_CREATION_INCOMPATIBLE_LUA_API:
 	return "OCGCore 使用的 Lua API 不兼容";
 ```
 
-- [ ] **Step 5: 运行原生测试**
+- [ ] **Step 9: 运行原生测试**
 
 ```bash
 ./scripts/build_native.sh
@@ -887,7 +936,7 @@ case OCG_DUEL_CREATION_INCOMPATIBLE_LUA_API:
 
 预期：所有 CTest 测试通过，原有幂等销毁和重复创建保护仍通过。
 
-- [ ] **Step 6: 运行真实数据决斗创建测试**
+- [ ] **Step 10: 运行真实数据决斗创建测试**
 
 测试在 `YGO_TEST_ASSET_ROOT` 存在时初始化完整数据库和真实
 CardScripts，再创建决斗：
@@ -900,14 +949,17 @@ YGO_TEST_SCRIPT_ROOT=/Volumes/WD/YGO/third_party/CardScripts \
 
 预期：OCGCore 11.0 创建、加载基础 Lua 并销毁成功。
 
-- [ ] **Step 7: 提交真实 OCGCore 回调**
+- [ ] **Step 11: 提交真实 OCGCore 回调**
 
 ```bash
-git add native/include/ygo/duel_session.hpp native/src/duel_session.cpp \
+git add native/include/ygo/ocg_card_data_adapter.hpp \
+  native/src/ocg_card_data_adapter.cpp \
+  native/include/ygo/duel_session.hpp native/src/duel_session.cpp \
+  native/tests/test_ocg_card_data_adapter.cpp \
   native/tests/test_duel_session.cpp native/CMakeLists.txt
 git commit \
   -m "feat(规则): 接入真实卡片与 Lua 回调" \
-  -m "DuelSession 现在共享持有卡片数据库和正式脚本加载器，向 OCGCore 提供真实卡片字段、稳定 setcode 缓冲区和按需 Lua 读取。" \
+  -m "新增正式 OCG 卡片字段适配组件，集中管理 CardRecord 到 OCG_CardData 的转换和 setcode 终止缓冲区；DuelSession 共享持有卡片数据库和正式脚本加载器。" \
   -m "基础脚本在决斗创建后立即加载，失败时会销毁半初始化句柄；决斗创建状态和自有日志已统一为中文。" \
   -m "验证：原生生命周期、字段适配、基础脚本和完整本地素材决斗创建测试全部通过。"
 ```
