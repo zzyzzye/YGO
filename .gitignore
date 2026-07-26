@@ -19,12 +19,16 @@ compile_commands.json
 .worktrees/
 
 # External card data and artwork
-/data/
-/images/
+/data/*
+!/data/.gdignore
+/images/*
+!/images/.gdignore
 
 # Third-party source and local development tooling
-/vendor/
-/tools/
+/vendor/*
+!/vendor/.gdignore
+/tools/*
+!/tools/.gdignore
 
 # Node dependencies and logs
 node_modules/

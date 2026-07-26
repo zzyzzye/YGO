@@ -6,7 +6,7 @@
 
 **Architecture:** Godot loads one `YgoCoreBridge` GDExtension class. The class delegates lifecycle work to a plain C++ `DuelSession`, keeping Godot `Variant` types out of the core wrapper. CMake builds the extension and a native test executable from the same wrapper sources.
 
-**Tech Stack:** Godot 4.6.3, GDScript, C++17, CMake 3.24+, godot-cpp 4.6, edo9300/ygopro-core, CTest.
+**Tech Stack:** Godot 4.6.3, GDScript, C++17, CMake 3.24+, a pinned godot-cpp `master` commit compatible with Godot 4.6, edo9300/ygopro-core, CTest.
 
 ## Global Constraints
 
@@ -61,7 +61,7 @@ LICENSES/THIRD_PARTY.md               Dependency origins and licenses
 Run:
 
 ```bash
-git submodule add -b 4.6 https://github.com/godotengine/godot-cpp.git third_party/godot-cpp
+git submodule add https://github.com/godotengine/godot-cpp.git third_party/godot-cpp
 git submodule add https://github.com/edo9300/ygopro-core.git third_party/ygopro-core
 git submodule add https://github.com/ProjectIgnis/CardScripts.git third_party/CardScripts
 git submodule add https://github.com/ProjectIgnis/BabelCDB.git third_party/BabelCDB
