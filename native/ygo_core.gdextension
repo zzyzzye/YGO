@@ -1,0 +1,10 @@
+[configuration]
+
+entry_symbol = "ygo_core_library_init"
+compatibility_minimum = "4.6"
+reloadable = true
+
+[libraries]
+
+macos.debug = "res://bin/macos/libygo_core.dylib"
+macos.release = "res://bin/macos/libygo_core.dylib"

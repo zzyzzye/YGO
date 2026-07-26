@@ -56,3 +56,22 @@ add_executable(test_duel_session tests/test_duel_session.cpp)
 target_link_libraries(test_duel_session PRIVATE ygo_duel_session)
 
 add_test(NAME duel_session_lifecycle COMMAND test_duel_session)
+
+set(GODOT_CPP_SYSTEM_HEADERS ON CACHE BOOL "" FORCE)
+add_subdirectory(
+	"${CMAKE_CURRENT_SOURCE_DIR}/../third_party/godot-cpp"
+	"${CMAKE_CURRENT_BINARY_DIR}/godot-cpp"
+	EXCLUDE_FROM_ALL
+)
+
+add_library(ygo_core SHARED
+	src/register_types.cpp
+	src/ygo_core_bridge.cpp
+)
+target_include_directories(ygo_core PRIVATE include)
+target_link_libraries(ygo_core PRIVATE godot::cpp ygo_duel_session)
+set_target_properties(ygo_core PROPERTIES
+	OUTPUT_NAME "ygo_core"
+	LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../bin/macos"
+	RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../bin/macos"
+)
