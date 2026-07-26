@@ -131,7 +131,11 @@ add_library(ygo_core SHARED
 	src/ygo_core_bridge.cpp
 )
 target_include_directories(ygo_core PRIVATE include)
-target_link_libraries(ygo_core PRIVATE godot::cpp ygo_duel_session)
+target_link_libraries(ygo_core PRIVATE
+	godot::cpp
+	ygo_duel_session
+	ygo_card_repository
+)
 set_target_properties(ygo_core PROPERTIES
 	OUTPUT_NAME "ygo_core"
 	LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../bin/macos"

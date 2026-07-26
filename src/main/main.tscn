@@ -34,3 +34,39 @@ unique_name_in_owner = true
 layout_mode = 2
 text = "Starting..."
 horizontal_alignment = 1
+
+[node name="GodotStatus" type="Label" parent="Center/Content"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Godot：正在检测"
+horizontal_alignment = 1
+
+[node name="CoreStatus" type="Label" parent="Center/Content"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "OCGCore：正在检测"
+horizontal_alignment = 1
+
+[node name="CardStatus" type="Label" parent="Center/Content"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "正式卡片：正在加载"
+horizontal_alignment = 1
+
+[node name="CacheStatus" type="Label" parent="Center/Content"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "缓存：正在检查"
+horizontal_alignment = 1
+
+[node name="TestCardStatus" type="Label" parent="Center/Content"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "测试卡片：正在查询"
+horizontal_alignment = 1
+
+[node name="LuaStatus" type="Label" parent="Center/Content"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Lua 规则：正在连接"
+horizontal_alignment = 1
