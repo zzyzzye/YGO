@@ -1,4 +1,4 @@
-[gd_scene load_steps=2 format=3]
+[gd_scene format=3]
 
 [ext_resource type="Script" path="res://src/main/main.gd" id="1_main"]
 
@@ -70,3 +70,71 @@ unique_name_in_owner = true
 layout_mode = 2
 text = "Lua 规则：正在连接"
 horizontal_alignment = 1
+
+[node name="DuelState" type="Label" parent="Center/Content"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "决斗状态：未启动"
+horizontal_alignment = 1
+
+[node name="Player1State" type="Label" parent="Center/Content"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "玩家1：未加载"
+horizontal_alignment = 1
+
+[node name="Player2State" type="Label" parent="Center/Content"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "玩家2：未加载"
+horizontal_alignment = 1
+
+[node name="StepStatus" type="Label" parent="Center/Content"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "等待操作..."
+horizontal_alignment = 1
+
+[node name="ButtonRow" type="HBoxContainer" parent="Center/Content"]
+layout_mode = 2
+alignment = 1
+
+[node name="StepButton" type="Button" parent="Center/Content/ButtonRow"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "推进一步"
+
+[node name="RestartButton" type="Button" parent="Center/Content/ButtonRow"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "重新开局"
+
+[node name="ActionLabel" type="Label" parent="Center/Content"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "动作入口（当前仅演示）："
+horizontal_alignment = 1
+
+[node name="ActionRow" type="HBoxContainer" parent="Center/Content"]
+layout_mode = 2
+alignment = 1
+
+[node name="SummonButton" type="Button" parent="Center/Content/ActionRow"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "召唤"
+
+[node name="SetButton" type="Button" parent="Center/Content/ActionRow"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "设定"
+
+[node name="ActivateButton" type="Button" parent="Center/Content/ActionRow"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "发动"
+
+[node name="EndTurnButton" type="Button" parent="Center/Content/ActionRow"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "结束回合"

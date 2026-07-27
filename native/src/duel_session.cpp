@@ -1,6 +1,7 @@
 #include "ygo/duel_session.hpp"
 
 #include "ocgapi.h"
+#include "ocgapi_constants.h"
 
 namespace {
 
@@ -87,6 +88,12 @@ CreateResult DuelSession::create(std::uint64_t seed) {
 	}
 
 	OCG_DuelOptions options{};
+	options.team1.startingLP = 8000;
+	options.team1.startingDrawCount = 5;
+	options.team1.drawCountPerTurn = 1;
+	options.team2.startingLP = 8000;
+	options.team2.startingDrawCount = 5;
+	options.team2.drawCountPerTurn = 1;
 	for (auto &value : options.seed) {
 		value = next_seed(seed);
 	}
@@ -113,12 +120,180 @@ CreateResult DuelSession::create(std::uint64_t seed) {
 	return {true, status, creation_message(status)};
 }
 
+AddDeckResult DuelSession::add_deck_cards(
+		const std::uint8_t team,
+		const std::vector<std::uint32_t> &codes,
+		const std::uint32_t location,
+		const std::uint8_t duelist) const {
+	if (!is_active()) {
+		return {false, 0, "决斗尚未创建"};
+	}
+	if (team > 1) {
+		return {false, 0, "队伍编号只能是 0 或 1"};
+	}
+	if (location != LOCATION_DECK && location != LOCATION_EXTRA) {
+		return {false, 0, "当前仅支持主卡组和额外卡组下发"};
+	}
+
+	std::size_t added = 0;
+	for (const auto code : codes) {
+		if (database_->find(code) == nullptr) {
+			continue;
+		}
+		const OCG_NewCardInfo info{
+				team,
+				duelist,
+				code,
+				team,
+				location,
+				static_cast<std::uint32_t>(added),
+				0,
+		};
+		// OCGCore 规定 duelist=0 写入当前出战玩家的真实区域，此时 con 决定
+		// 控制方；大于 0 才按 team 写入换人决斗备用列表。普通双方对局必须
+		// 使用默认值 0 且 con=team，否则卡会进入错误玩家或区域查询为零。
+		OCG_DuelNewCard(static_cast<OCG_Duel>(duel_), &info);
+		++added;
+	}
+	return {added > 0, added, "下发卡片完成：请求 " + std::to_string(codes.size())
+												  + " 张，实际加入 "
+												  + std::to_string(added) + " 张"};
+}
+
+ProcessResult DuelSession::start() {
+	if (!is_active()) {
+		return {false, OCG_DUEL_STATUS_END, "决斗尚未创建", {}};
+	}
+	OCG_StartDuel(static_cast<OCG_Duel>(duel_));
+	return process_once();
+}
+
+ProcessResult DuelSession::step() {
+	if (!is_active()) {
+		return {false, OCG_DUEL_STATUS_END, "决斗尚未创建", {}};
+	}
+	if (pending_action_.kind != PendingActionKind::None) {
+		return {
+				false,
+				OCG_DUEL_STATUS_AWAITING,
+				"当前正在等待玩家决策，不能直接推进规则引擎",
+				pending_action_,
+		};
+	}
+	return process_once();
+}
+
+ProcessResult DuelSession::process_once() {
+	int status = OCG_DUEL_STATUS_CONTINUE;
+	constexpr int max_auto_pass_count = 32;
+	for (int pass_index = 0; pass_index < max_auto_pass_count; ++pass_index) {
+		status = OCG_DuelProcess(static_cast<OCG_Duel>(duel_));
+		std::uint32_t message_size = 0;
+		const auto *message_data = static_cast<const std::uint8_t *>(
+				OCG_DuelGetMessage(static_cast<OCG_Duel>(duel_), &message_size));
+		pending_action_ = parse_pending_action(message_data, message_size);
+		if (pending_action_.kind == PendingActionKind::Retry
+				&& last_submitted_action_.kind != PendingActionKind::None) {
+			pending_action_.player = last_submitted_action_.player;
+			pending_action_.message += "；上一动作来自玩家"
+					+ std::to_string(last_submitted_action_.player + 1);
+		} else if (pending_action_.kind != PendingActionKind::None
+				&& pending_action_.kind != PendingActionKind::AutoPassChain) {
+			last_submitted_action_ = {};
+		}
+		if (pending_action_.kind != PendingActionKind::AutoPassChain) {
+			break;
+		}
+
+		// 非强制且无候选项的连锁窗口没有用户可做的选择。按上游
+		// SelectChain 协议提交 int32(-1)，避免把协议维护步骤暴露给界面。
+		const std::uint8_t pass_response[4]{0xff, 0xff, 0xff, 0xff};
+		OCG_DuelSetResponse(
+				static_cast<OCG_Duel>(duel_),
+				pass_response,
+				sizeof(pass_response));
+		pending_action_ = {};
+	}
+	if (pending_action_.kind == PendingActionKind::AutoPassChain) {
+		pending_action_ = {
+				PendingActionKind::Malformed,
+				-1,
+				false,
+				MSG_SELECT_CHAIN,
+				"自动跳过空连锁次数超过安全上限",
+		};
+	}
+
+	std::string message;
+	switch (status) {
+	case OCG_DUEL_STATUS_END:
+		message = "对局已结束";
+		break;
+	case OCG_DUEL_STATUS_AWAITING:
+		message = "等待玩家决策输入";
+		break;
+	case OCG_DUEL_STATUS_CONTINUE:
+		message = "规则引擎可继续推进";
+		break;
+	default:
+		message = "OCGCore 返回未知处理状态";
+		break;
+	}
+	if (status == OCG_DUEL_STATUS_AWAITING
+			&& pending_action_.kind == PendingActionKind::None) {
+		pending_action_ = {
+				PendingActionKind::Malformed,
+				-1,
+				false,
+				-1,
+				"OCGCore 等待输入，但本轮消息中没有可识别的玩家决策",
+		};
+	}
+	return {true, status, std::move(message), pending_action_};
+}
+
+void DuelSession::set_response(const void *response_data, std::size_t response_size) {
+	if (!is_active()) {
+		return;
+	}
+	OCG_DuelSetResponse(static_cast<OCG_Duel>(duel_), response_data, static_cast<std::uint32_t>(response_size));
+}
+
+ProcessResult DuelSession::submit_end_turn() {
+	if (!is_active()) {
+		return {false, OCG_DUEL_STATUS_END, "决斗尚未创建", {}};
+	}
+	if (pending_action_.kind != PendingActionKind::Idle
+			|| !pending_action_.can_end_turn) {
+		return {false, OCG_DUEL_STATUS_AWAITING, "当前不是可结束回合的空闲阶段", pending_action_};
+	}
+
+	// SelectIdleCmd 返回协议是一个小端 int32：低 16 位 type=7 表示进入 EP，
+	// 高 16 位索引在此动作中固定为 0。
+	const std::uint8_t response[4]{7, 0, 0, 0};
+	last_submitted_action_ = pending_action_;
+	OCG_DuelSetResponse(static_cast<OCG_Duel>(duel_), response, sizeof(response));
+	pending_action_ = {};
+	return process_once();
+}
+
+std::uint32_t DuelSession::query_count(
+		const std::uint8_t team,
+		const std::uint32_t location) const {
+	if (!is_active() || team > 1) {
+		return 0;
+	}
+	return OCG_DuelQueryCount(static_cast<OCG_Duel>(duel_), team, location);
+}
+
 void DuelSession::destroy() noexcept {
 	if (duel_ == nullptr) {
 		return;
 	}
 	OCG_DestroyDuel(static_cast<OCG_Duel>(duel_));
 	duel_ = nullptr;
+	pending_action_ = {};
+	last_submitted_action_ = {};
 }
 
 bool DuelSession::is_active() const noexcept {

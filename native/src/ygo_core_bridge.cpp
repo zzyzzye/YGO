@@ -2,13 +2,75 @@
 
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/packed_string_array.hpp>
+#include <godot_cpp/variant/packed_int64_array.hpp>
 #include <godot_cpp/variant/string.hpp>
+
+#include "ocgapi.h"
+#include "ocgapi_constants.h"
 
 #include <filesystem>
 #include <limits>
 #include <utility>
+#include <vector>
 
 namespace ygo {
+
+namespace {
+
+godot::Dictionary pending_action_to_dictionary(const PendingAction &pending) {
+	godot::Dictionary response;
+	switch (pending.kind) {
+	case PendingActionKind::None:
+		response["kind"] = godot::String("none");
+		break;
+	case PendingActionKind::Idle:
+		response["kind"] = godot::String("idle");
+		break;
+	case PendingActionKind::AutoPassChain:
+		response["kind"] = godot::String("auto_pass_chain");
+		break;
+	case PendingActionKind::Retry:
+		response["kind"] = godot::String("retry");
+		break;
+	case PendingActionKind::Unsupported:
+		response["kind"] = godot::String("unsupported");
+		break;
+	case PendingActionKind::Malformed:
+		response["kind"] = godot::String("malformed");
+		break;
+	}
+	response["player"] = pending.player;
+	response["can_end_turn"] = pending.can_end_turn;
+	response["message_type"] = pending.message_type;
+	response["message"] = godot::String::utf8(pending.message.c_str());
+	return response;
+}
+
+godot::Dictionary process_result_to_dictionary(const ProcessResult &result) {
+	godot::Dictionary response;
+	response["ok"] = result.ok;
+	response["status"] = result.status;
+	response["message"] = godot::String::utf8(result.message.c_str());
+	response["pending_action"] = pending_action_to_dictionary(result.pending_action);
+	return response;
+}
+
+ProcessResult advance_to_player_decision(DuelSession &session, ProcessResult result) {
+	// 通知消息会让 OCG_DuelProcess 返回 CONTINUE，但并不需要界面决策。
+	// 设置有限上限，既能穿过开局/换阶段通知，也防止异常规则脚本无限推进。
+	constexpr int max_steps = 100;
+	for (int step_index = 0;
+			step_index < max_steps
+			&& result.ok
+			&& result.status != OCG_DUEL_STATUS_END
+			&& result.pending_action.kind == PendingActionKind::None;
+			++step_index) {
+		result = session.step();
+	}
+	return result;
+}
+
+} // namespace
 
 YgoCoreBridge::YgoCoreBridge() {
 }
@@ -35,6 +97,7 @@ godot::Dictionary YgoCoreBridge::initialize_card_database(
 	session_.reset();
 	scripts_.reset();
 	database_.reset();
+	scripts_root_.clear();
 
 	CardRepository repository;
 	repository_status_ = repository.initialize({
@@ -61,6 +124,7 @@ godot::Dictionary YgoCoreBridge::initialize_card_database(
 
 	database_ = repository_status_.database;
 	scripts_ = std::move(scripts);
+	scripts_root_ = root / "third_party/CardScripts";
 	session_ = std::make_unique<DuelSession>(database_, scripts_);
 
 	godot::PackedStringArray warnings;
@@ -136,6 +200,32 @@ godot::Dictionary YgoCoreBridge::get_core_version() const {
 	return version;
 }
 
+godot::PackedInt64Array YgoCoreBridge::get_scripted_card_ids() const {
+	godot::PackedInt64Array ids;
+	if (!database_ || !scripts_) {
+		return ids;
+	}
+
+	constexpr std::uint32_t excluded_types =
+			TYPE_FUSION | TYPE_SYNCHRO | TYPE_XYZ | TYPE_LINK | TYPE_TOKEN;
+	for (const auto &[id, record] : database_->records()) {
+		// 当前诊断牌组只使用通常主卡组卡，避免尚未实现的效果选择打断
+		// “开局—结束回合”闭环；复杂动作将在后续语义接口中逐类接入。
+		if ((record.rule.type & excluded_types) != 0
+				|| (record.rule.type & TYPE_NORMAL) == 0) {
+			continue;
+		}
+		const auto script_path = scripts_root_ / "official" / ("c" + std::to_string(id) + ".lua");
+		if (std::filesystem::is_regular_file(script_path)) {
+			ids.push_back(static_cast<std::int64_t>(id));
+		}
+	}
+	for (std::int64_t index = 0; ids.size() < 40 && index < ids.size(); ++index) {
+		ids.push_back(ids[index]);
+	}
+	return ids;
+}
+
 godot::Dictionary YgoCoreBridge::create_duel(std::int64_t seed) {
 	if (!session_) {
 		godot::Dictionary response;
@@ -149,6 +239,167 @@ godot::Dictionary YgoCoreBridge::create_duel(std::int64_t seed) {
 	response["ok"] = result.ok;
 	response["status"] = result.status;
 	response["message"] = godot::String(result.message.c_str());
+	return response;
+}
+
+godot::Dictionary YgoCoreBridge::setup_duel(
+		const godot::PackedInt64Array &player1_main,
+		const godot::PackedInt64Array &player2_main,
+		const std::int64_t seed) {
+	godot::Dictionary response;
+	if (!session_) {
+		response["ok"] = false;
+		response["message"] = godot::String("卡片数据库尚未初始化");
+		response["status"] = -1;
+		return response;
+	}
+	if (session_->is_active()) {
+		session_->destroy();
+	}
+
+	const CreateResult create_result = session_->create(static_cast<std::uint64_t>(seed));
+	if (!create_result.ok) {
+		response["ok"] = false;
+		response["status"] = create_result.status;
+		response["message"] = godot::String(create_result.message.c_str());
+		return response;
+	}
+
+	auto to_code_list = [](const godot::PackedInt64Array &source,
+						  std::vector<std::uint32_t> &out) {
+		std::size_t skipped = 0;
+		for (const auto value : source) {
+			if (value <= 0 || value > std::numeric_limits<std::uint32_t>::max()) {
+				++skipped;
+				continue;
+			}
+			out.push_back(static_cast<std::uint32_t>(value));
+		}
+		return skipped;
+	};
+
+	std::vector<std::uint32_t> deck1;
+	std::vector<std::uint32_t> deck2;
+	const auto skipped1 = to_code_list(player1_main, deck1);
+	const auto skipped2 = to_code_list(player2_main, deck2);
+
+	const auto deck1_result = session_->add_deck_cards(0, deck1, LOCATION_DECK);
+	const auto deck2_result = session_->add_deck_cards(1, deck2, LOCATION_DECK);
+	if (!deck1_result.ok || !deck2_result.ok) {
+		session_->destroy();
+		response["ok"] = false;
+		response["status"] = -1;
+		std::string message = "牌组下发失败：";
+		if (!deck1_result.ok) {
+			message += "玩家1未能写入有效卡片；";
+		}
+		if (!deck2_result.ok) {
+			message += "玩家2未能写入有效卡片；";
+		}
+		response["message"] = godot::String(message.c_str());
+		return response;
+	}
+
+	const ProcessResult started = advance_to_player_decision(*session_, session_->start());
+	response["ok"] = true;
+	response["status"] = started.status;
+	response["message"] = godot::String("决斗设置并启动完成");
+	response["pending_action"] = pending_action_to_dictionary(started.pending_action);
+	response["player1_added"] = static_cast<std::int64_t>(deck1_result.added);
+	response["player2_added"] = static_cast<std::int64_t>(deck2_result.added);
+	response["player1_invalid"] = static_cast<std::int64_t>(skipped1);
+	response["player2_invalid"] = static_cast<std::int64_t>(skipped2);
+	return response;
+}
+
+godot::Dictionary YgoCoreBridge::start_duel() {
+	godot::Dictionary response;
+	if (!session_ || !session_->is_active()) {
+		response["ok"] = false;
+		response["message"] = godot::String("决斗尚未创建");
+		response["status"] = OCG_DUEL_STATUS_END;
+		return response;
+	}
+
+	return process_result_to_dictionary(
+			advance_to_player_decision(*session_, session_->step()));
+}
+
+godot::Dictionary YgoCoreBridge::send_duel_response(
+		const godot::PackedByteArray &response_data) {
+	godot::Dictionary response;
+	if (!session_ || !session_->is_active()) {
+		response["ok"] = false;
+		response["message"] = godot::String("决斗尚未创建");
+		return response;
+	}
+
+	session_->set_response(response_data.ptr(), response_data.size());
+	return process_result_to_dictionary(
+			advance_to_player_decision(*session_, session_->step()));
+}
+
+godot::Dictionary YgoCoreBridge::get_pending_action() const {
+	if (!session_ || !session_->is_active()) {
+		return pending_action_to_dictionary({
+				PendingActionKind::None,
+				-1,
+				false,
+				-1,
+				"当前无活动决斗",
+		});
+	}
+	return pending_action_to_dictionary(session_->pending_action());
+}
+
+godot::Dictionary YgoCoreBridge::submit_end_turn() {
+	if (!session_ || !session_->is_active()) {
+		return process_result_to_dictionary({
+				false,
+				OCG_DUEL_STATUS_END,
+				"决斗尚未创建",
+				{},
+		});
+	}
+	const ProcessResult result = session_->submit_end_turn();
+	if (!result.ok) {
+		return process_result_to_dictionary(result);
+	}
+	return process_result_to_dictionary(
+			advance_to_player_decision(*session_, result));
+}
+
+godot::Dictionary YgoCoreBridge::get_duel_state() const {
+	godot::Dictionary response;
+	if (!session_ || !session_->is_active()) {
+		response["ok"] = false;
+		response["message"] = godot::String("当前无活动决斗");
+		return response;
+	}
+
+	auto collect_state = [this](std::uint8_t team) {
+		godot::Dictionary state;
+		state["deck"] = static_cast<std::int64_t>(
+				session_->query_count(team, LOCATION_DECK));
+		state["hand"] = static_cast<std::int64_t>(
+				session_->query_count(team, LOCATION_HAND));
+		state["monster_zone"] = static_cast<std::int64_t>(
+				session_->query_count(team, LOCATION_MZONE));
+		state["spell_trap_zone"] = static_cast<std::int64_t>(
+				session_->query_count(team, LOCATION_SZONE));
+		state["graveyard"] = static_cast<std::int64_t>(
+				session_->query_count(team, LOCATION_GRAVE));
+		state["banished"] = static_cast<std::int64_t>(
+				session_->query_count(team, LOCATION_REMOVED));
+		return state;
+	};
+
+	godot::Dictionary players;
+	players["p1"] = collect_state(0);
+	players["p2"] = collect_state(1);
+	response["ok"] = true;
+	response["message"] = godot::String("决斗状态读取成功");
+	response["players"] = players;
 	return response;
 }
 
@@ -176,7 +427,26 @@ void YgoCoreBridge::_bind_methods() {
 			godot::D_METHOD("get_cache_state"),
 			&YgoCoreBridge::get_cache_state);
 	godot::ClassDB::bind_method(godot::D_METHOD("get_core_version"), &YgoCoreBridge::get_core_version);
+	godot::ClassDB::bind_method(
+			godot::D_METHOD("get_scripted_card_ids"),
+			&YgoCoreBridge::get_scripted_card_ids);
 	godot::ClassDB::bind_method(godot::D_METHOD("create_duel", "seed"), &YgoCoreBridge::create_duel);
+	godot::ClassDB::bind_method(
+			godot::D_METHOD("setup_duel", "player1_main", "player2_main", "seed"),
+			&YgoCoreBridge::setup_duel);
+	godot::ClassDB::bind_method(godot::D_METHOD("start_duel"), &YgoCoreBridge::start_duel);
+	godot::ClassDB::bind_method(
+			godot::D_METHOD("send_duel_response", "response"),
+			&YgoCoreBridge::send_duel_response);
+	godot::ClassDB::bind_method(
+			godot::D_METHOD("get_pending_action"),
+			&YgoCoreBridge::get_pending_action);
+	godot::ClassDB::bind_method(
+			godot::D_METHOD("submit_end_turn"),
+			&YgoCoreBridge::submit_end_turn);
+	godot::ClassDB::bind_method(
+			godot::D_METHOD("get_duel_state"),
+			&YgoCoreBridge::get_duel_state);
 	godot::ClassDB::bind_method(godot::D_METHOD("destroy_duel"), &YgoCoreBridge::destroy_duel);
 	godot::ClassDB::bind_method(godot::D_METHOD("is_duel_active"), &YgoCoreBridge::is_duel_active);
 }
