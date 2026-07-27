@@ -9,7 +9,7 @@ var title_label: Label
 
 
 func _ready() -> void:
-	custom_minimum_size = Vector2(70, 88)
+	custom_minimum_size = Vector2(105, 132)
 	var style := StyleBoxFlat.new()
 	style.bg_color = Color("#202020")
 	style.border_color = Color("#777777")
@@ -28,7 +28,7 @@ func _ready() -> void:
 	stack.add_child(card_container)
 	title_label = Label.new()
 	title_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	title_label.add_theme_font_size_override("font_size", 11)
+	title_label.add_theme_font_size_override("font_size", 15)
 	title_label.modulate = Color("#cfcfcf")
 	stack.add_child(title_label)
 
@@ -43,8 +43,10 @@ func show_card(card_data: Dictionary, show_back := false) -> void:
 	for child in card_container.get_children():
 		child.queue_free()
 	var card = CARD_VIEW_SCRIPT.new()
-	card.custom_minimum_size = Vector2(48, 70)
 	card_container.add_child(card)
+	# CardView 在 _ready() 中建立手牌默认尺寸，因此必须在进入树后覆盖，
+	# 才能让场区卡保持紧凑并避免两行区域挤压手牌。
+	card.custom_minimum_size = Vector2(72, 105)
 	card.configure(card_data, show_back)
 
 

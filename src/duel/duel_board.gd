@@ -7,6 +7,7 @@ const ZONE_VIEW_SCRIPT = preload("res://src/ui/zone_view.gd")
 signal idle_action_requested(action_kind: String, index: int, card_data: Dictionary)
 signal end_turn_requested
 signal restart_requested
+signal exit_requested
 
 var player_hand
 var opponent_hand
@@ -42,11 +43,11 @@ func _build_interface() -> void:
 
 	var root := HBoxContainer.new()
 	root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	root.offset_left = 18
-	root.offset_top = 14
-	root.offset_right = -18
-	root.offset_bottom = -14
-	root.add_theme_constant_override("separation", 16)
+	root.offset_left = 28
+	root.offset_top = 22
+	root.offset_right = -28
+	root.offset_bottom = -22
+	root.add_theme_constant_override("separation", 24)
 	add_child(root)
 
 	root.add_child(_build_detail_panel())
@@ -55,8 +56,8 @@ func _build_interface() -> void:
 
 	debug_overlay = Label.new()
 	debug_overlay.visible = false
-	debug_overlay.position = Vector2(230, 18)
-	debug_overlay.size = Vector2(820, 112)
+	debug_overlay.position = Vector2(345, 27)
+	debug_overlay.size = Vector2(1230, 168)
 	debug_overlay.z_index = 20
 	debug_overlay.add_theme_color_override("font_color", Color.WHITE)
 	debug_overlay.add_theme_color_override("font_shadow_color", Color.BLACK)
@@ -67,21 +68,21 @@ func _build_interface() -> void:
 
 func _build_detail_panel() -> Control:
 	var panel := VBoxContainer.new()
-	panel.custom_minimum_size = Vector2(210, 0)
-	panel.add_theme_constant_override("separation", 8)
+	panel.custom_minimum_size = Vector2(290, 0)
+	panel.add_theme_constant_override("separation", 12)
 	var heading := Label.new()
 	heading.text = "卡片资料"
-	heading.add_theme_font_size_override("font_size", 22)
+	heading.add_theme_font_size_override("font_size", 30)
 	panel.add_child(heading)
 	detail_image = TextureRect.new()
-	detail_image.custom_minimum_size = Vector2(180, 262)
+	detail_image.custom_minimum_size = Vector2(270, 393)
 	detail_image.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	detail_image.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 	panel.add_child(detail_image)
 	detail_name = Label.new()
 	detail_name.text = "悬停或选择手牌"
 	detail_name.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	detail_name.add_theme_font_size_override("font_size", 18)
+	detail_name.add_theme_font_size_override("font_size", 24)
 	panel.add_child(detail_name)
 	detail_type = Label.new()
 	detail_type.modulate = Color("#bbbbbb")
@@ -97,12 +98,12 @@ func _build_detail_panel() -> Control:
 
 func _build_field_panel() -> Control:
 	var panel := VBoxContainer.new()
-	panel.custom_minimum_size = Vector2(790, 0)
+	panel.custom_minimum_size = Vector2(1170, 0)
 	panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	panel.add_theme_constant_override("separation", 5)
+	panel.add_theme_constant_override("separation", 8)
 
 	opponent_hand = HAND_VIEW_SCRIPT.new()
-	opponent_hand.custom_minimum_size.y = 94
+	opponent_hand.custom_minimum_size.y = 149
 	panel.add_child(opponent_hand)
 	opponent_stats_label = Label.new()
 	opponent_stats_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -112,11 +113,11 @@ func _build_field_panel() -> Control:
 	opponent_monster_zones = _add_zone_row(panel, "对手怪兽", true)
 
 	var divider := HSeparator.new()
-	divider.custom_minimum_size.y = 12
+	divider.custom_minimum_size.y = 18
 	panel.add_child(divider)
 	turn_label = Label.new()
 	turn_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	turn_label.add_theme_font_size_override("font_size", 17)
+	turn_label.add_theme_font_size_override("font_size", 23)
 	turn_label.text = "等待决斗数据"
 	panel.add_child(turn_label)
 
@@ -127,7 +128,7 @@ func _build_field_panel() -> Control:
 	player_stats_label.modulate = Color("#cfcfcf")
 	panel.add_child(player_stats_label)
 	player_hand = HAND_VIEW_SCRIPT.new()
-	player_hand.custom_minimum_size.y = 98
+	player_hand.custom_minimum_size.y = 149
 	player_hand.card_selected.connect(_on_card_selected)
 	player_hand.card_hovered.connect(_show_card_detail)
 	panel.add_child(player_hand)
@@ -137,7 +138,7 @@ func _build_field_panel() -> Control:
 func _add_zone_row(parent: VBoxContainer, prefix: String, opponent := false) -> Array:
 	var row := HBoxContainer.new()
 	row.alignment = BoxContainer.ALIGNMENT_CENTER
-	row.add_theme_constant_override("separation", 6)
+	row.add_theme_constant_override("separation", 9)
 	parent.add_child(row)
 	var zones: Array = []
 	for index in range(5):
@@ -151,11 +152,11 @@ func _add_zone_row(parent: VBoxContainer, prefix: String, opponent := false) -> 
 
 func _build_action_panel() -> Control:
 	var panel := VBoxContainer.new()
-	panel.custom_minimum_size = Vector2(210, 0)
-	panel.add_theme_constant_override("separation", 10)
+	panel.custom_minimum_size = Vector2(290, 0)
+	panel.add_theme_constant_override("separation", 15)
 	var heading := Label.new()
 	heading.text = "决斗操作"
-	heading.add_theme_font_size_override("font_size", 22)
+	heading.add_theme_font_size_override("font_size", 30)
 	panel.add_child(heading)
 	status_label = Label.new()
 	status_label.text = "正在初始化……"
@@ -176,6 +177,10 @@ func _build_action_panel() -> Control:
 	restart.text = "重新开局"
 	restart.pressed.connect(restart_requested.emit)
 	panel.add_child(restart)
+	var exit_game := Button.new()
+	exit_game.text = "退出游戏"
+	exit_game.pressed.connect(exit_requested.emit)
+	panel.add_child(exit_game)
 	var help := Label.new()
 	help.text = "F1：诊断信息"
 	help.modulate = Color("#999999")

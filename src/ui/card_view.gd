@@ -10,7 +10,9 @@ var selected := false
 
 
 func _ready() -> void:
-	custom_minimum_size = Vector2(68, 99)
+	# 手牌以 1080P 为设计基准；父级场区可在节点进入树后覆盖为紧凑尺寸。
+	# 依赖容器的最小尺寸而非屏幕坐标，使 2K、4K 下仍可等比扩展。
+	custom_minimum_size = Vector2(102, 149)
 	ignore_texture_size = true
 	stretch_mode = TextureButton.STRETCH_KEEP_ASPECT_CENTERED
 	mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
@@ -45,11 +47,11 @@ func _draw() -> void:
 	if face_down:
 		draw_string(
 			ThemeDB.fallback_font,
-			Vector2(11, size.y * 0.54),
+			Vector2(17, size.y * 0.54),
 			"CARD",
 			HORIZONTAL_ALIGNMENT_LEFT,
 			-1,
-			13,
+			18,
 			Color.WHITE
 		)
 

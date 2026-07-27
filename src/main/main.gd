@@ -16,6 +16,7 @@ func _ready() -> void:
 	board.idle_action_requested.connect(_on_idle_action_requested)
 	board.end_turn_requested.connect(_on_end_turn_requested)
 	board.restart_requested.connect(_on_restart_requested)
+	board.exit_requested.connect(_on_exit_requested)
 
 	var initialized: Dictionary = bridge.call(
 		"initialize_card_database",
@@ -115,6 +116,12 @@ func _on_end_turn_requested() -> void:
 func _on_restart_requested() -> void:
 	var new_seed := int(Time.get_unix_time_from_system()) & 0x7fffffff
 	_start_duel(new_seed if new_seed > 0 else DUEL_SEED)
+
+
+func _on_exit_requested() -> void:
+	# 退出树时会进入 _exit_tree() 并销毁活动 DuelSession，避免全屏窗口
+	# 直接消失后仍让 OCGCore 持有卡库或脚本加载器的借用指针。
+	get_tree().quit()
 
 
 func _action_text(action_kind: String) -> String:

@@ -34,7 +34,7 @@
 - [ ] **Step 2: 修改项目设置**
 
 将 viewport 改为 `1920×1080`，并设置
-`window/size/mode=3`（独占全屏）。
+`window/size/mode=4`（独占全屏）。
 
 - [ ] **Step 3: 验证配置**
 
