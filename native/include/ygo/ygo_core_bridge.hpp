@@ -48,6 +48,11 @@ public:
 	godot::Dictionary get_pending_action() const;
 	// 仅在当前空闲阶段允许进入结束阶段时提交动作，并推进到下一个决策点。
 	godot::Dictionary submit_end_turn();
+	// 提交当前空闲阶段真实候选；action_kind 使用稳定英文协议标识，
+	// 用户可见按钮文字仍由 Godot 以中文显示。
+	godot::Dictionary submit_idle_action(
+			const godot::String &action_kind,
+			std::int64_t index);
 	// 返回当前双方场上状态计数（卡组/手牌/怪兽区/魔陷区/墓地/除外区）。
 	godot::Dictionary get_duel_state() const;
 	void destroy_duel();

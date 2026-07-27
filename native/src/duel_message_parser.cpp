@@ -34,6 +34,19 @@ public:
 		return true;
 	}
 
+	bool read_u64(std::uint64_t &value) {
+		if (remaining() < 8) {
+			return false;
+		}
+		value = 0;
+		for (std::size_t index = 0; index < 8; ++index) {
+			value |= static_cast<std::uint64_t>(data_[offset_ + index])
+					<< (index * 8U);
+		}
+		offset_ += 8;
+		return true;
+	}
+
 	bool skip(const std::size_t count) {
 		if (remaining() < count) {
 			return false;
@@ -85,15 +98,44 @@ ygo::PendingAction parse_idle_message(
 		};
 	}
 
-	// 六组候选项与上游 playerop.cpp 的 MSG_SELECT_IDLECMD 写入顺序严格对应：
-	// 通常召唤、特殊召唤、表示形式变更、怪兽盖放、魔陷盖放、可发动效果。
-	constexpr std::array<std::size_t, 6> element_sizes{10, 10, 7, 10, 10, 19};
-	for (const auto element_size : element_sizes) {
+	constexpr std::array<ygo::IdleActionKind, 6> action_kinds{
+			ygo::IdleActionKind::NormalSummon,
+			ygo::IdleActionKind::SpecialSummon,
+			ygo::IdleActionKind::Reposition,
+			ygo::IdleActionKind::MonsterSet,
+			ygo::IdleActionKind::SpellTrapSet,
+			ygo::IdleActionKind::Activate,
+	};
+	std::vector<ygo::IdleAction> actions;
+	for (std::size_t list_index = 0; list_index < action_kinds.size(); ++list_index) {
 		std::uint32_t count = 0;
-		if (!reader.read_u32(count)
-				|| count > std::numeric_limits<std::size_t>::max() / element_size
-				|| !reader.skip(static_cast<std::size_t>(count) * element_size)) {
+		if (!reader.read_u32(count)) {
 			return malformed_idle_message();
+		}
+		for (std::uint32_t action_index = 0; action_index < count; ++action_index) {
+			ygo::IdleAction action;
+			action.kind = action_kinds[list_index];
+			action.index = action_index;
+			if (!reader.read_u32(action.card_id)
+					|| !reader.read_u8(action.controller)
+					|| !reader.read_u8(action.location)) {
+				return malformed_idle_message();
+			}
+			if (action.kind == ygo::IdleActionKind::Reposition) {
+				std::uint8_t sequence = 0;
+				if (!reader.read_u8(sequence)) {
+					return malformed_idle_message();
+				}
+				action.sequence = sequence;
+			} else if (!reader.read_u32(action.sequence)) {
+				return malformed_idle_message();
+			}
+			if (action.kind == ygo::IdleActionKind::Activate
+					&& (!reader.read_u64(action.description)
+							|| !reader.read_u8(action.client_mode))) {
+				return malformed_idle_message();
+			}
+			actions.push_back(action);
 		}
 	}
 
@@ -106,7 +148,7 @@ ygo::PendingAction parse_idle_message(
 		return malformed_idle_message();
 	}
 
-	return {
+	ygo::PendingAction pending{
 			ygo::PendingActionKind::Idle,
 			static_cast<int>(player),
 			can_end_turn != 0,
@@ -114,6 +156,8 @@ ygo::PendingAction parse_idle_message(
 			can_end_turn != 0 ? "等待玩家选择空闲阶段动作"
 							  : "当前空闲阶段不能结束回合",
 	};
+	pending.idle_actions = std::move(actions);
+	return pending;
 }
 
 ygo::PendingAction parse_chain_message(
@@ -164,6 +208,78 @@ ygo::PendingAction parse_chain_message(
 			MSG_SELECT_CHAIN,
 			"当前连锁选择包含候选效果，尚未实现",
 	};
+}
+
+ygo::PendingAction parse_select_place_message(
+		const std::uint8_t *data,
+		const std::size_t size) {
+	ByteReader reader(data, size);
+	std::uint8_t message_type = 0;
+	std::uint8_t player = 0;
+	std::uint8_t count = 0;
+	std::uint32_t forbidden = 0;
+	if (!reader.read_u8(message_type)
+			|| !reader.read_u8(player)
+			|| !reader.read_u8(count)
+			|| !reader.read_u32(forbidden)
+			|| player > 1) {
+		return {
+				ygo::PendingActionKind::Malformed,
+				-1,
+				false,
+				MSG_SELECT_PLACE,
+				"区域选择消息长度不足或玩家编号非法",
+		};
+	}
+	if (count != 1) {
+		return {
+				ygo::PendingActionKind::Unsupported,
+				static_cast<int>(player),
+				false,
+				MSG_SELECT_PLACE,
+				"当前需要同时选择多个区域，尚未实现",
+		};
+	}
+
+	std::vector<ygo::PlaceOption> options;
+	for (std::uint8_t side_index = 0; side_index < 2; ++side_index) {
+		// 位掩码低 16 位属于当前选择者，高 16 位属于对手。候选顺序必须
+		// 始终“己方优先”，否则玩家2行动时会确定性选到玩家1的区域。
+		const std::uint8_t selected_player =
+				side_index == 0 ? player : static_cast<std::uint8_t>(1U - player);
+		const std::uint32_t player_shift =
+				selected_player == player ? 0U : 16U;
+		for (std::uint8_t sequence = 0; sequence <= 6; ++sequence) {
+			const std::uint32_t bit = 1U << (player_shift + sequence);
+			if ((forbidden & bit) == 0) {
+				options.push_back({selected_player, LOCATION_MZONE, sequence});
+			}
+		}
+		for (std::uint8_t sequence = 0; sequence <= 7; ++sequence) {
+			const std::uint32_t bit = 1U << (player_shift + 8U + sequence);
+			if ((forbidden & bit) == 0) {
+				options.push_back({selected_player, LOCATION_SZONE, sequence});
+			}
+		}
+	}
+	if (options.empty()) {
+		return {
+				ygo::PendingActionKind::Malformed,
+				static_cast<int>(player),
+				false,
+				MSG_SELECT_PLACE,
+				"区域选择消息没有任何合法区域",
+		};
+	}
+	ygo::PendingAction pending{
+			ygo::PendingActionKind::AutoSelectPlace,
+			static_cast<int>(player),
+			false,
+			MSG_SELECT_PLACE,
+			"正在选择第一个合法场地区域",
+	};
+	pending.place_options = std::move(options);
+	return pending;
 }
 
 bool requires_player_response(const std::uint8_t message_type) {
@@ -227,6 +343,8 @@ PendingAction parse_pending_action(
 			pending = parse_idle_message(frame, frame_size);
 		} else if (frame[0] == MSG_SELECT_CHAIN) {
 			pending = parse_chain_message(frame, frame_size);
+		} else if (frame[0] == MSG_SELECT_PLACE) {
+			pending = parse_select_place_message(frame, frame_size);
 		} else if (frame[0] == MSG_RETRY) {
 			pending = {
 					PendingActionKind::Retry,

@@ -3,6 +3,8 @@
 #include "ocgapi.h"
 #include "ocgapi_constants.h"
 
+#include <algorithm>
+
 namespace {
 
 void read_card(void *payload, std::uint32_t code, OCG_CardData *data) {
@@ -192,6 +194,16 @@ ProcessResult DuelSession::process_once() {
 		const auto *message_data = static_cast<const std::uint8_t *>(
 				OCG_DuelGetMessage(static_cast<OCG_Duel>(duel_), &message_size));
 		pending_action_ = parse_pending_action(message_data, message_size);
+		if (pending_action_.kind == PendingActionKind::AutoSelectPlace
+				&& !allow_auto_select_place_) {
+			pending_action_ = {
+					PendingActionKind::Unsupported,
+					pending_action_.player,
+					false,
+					MSG_SELECT_PLACE,
+					"当前区域选择不属于召唤或盖放后续步骤，需要玩家明确选择",
+			};
+		}
 		if (pending_action_.kind == PendingActionKind::Retry
 				&& last_submitted_action_.kind != PendingActionKind::None) {
 			pending_action_.player = last_submitted_action_.player;
@@ -201,20 +213,38 @@ ProcessResult DuelSession::process_once() {
 				&& pending_action_.kind != PendingActionKind::AutoPassChain) {
 			last_submitted_action_ = {};
 		}
-		if (pending_action_.kind != PendingActionKind::AutoPassChain) {
+		if (pending_action_.kind != PendingActionKind::AutoPassChain
+				&& pending_action_.kind != PendingActionKind::AutoSelectPlace) {
 			break;
 		}
 
-		// 非强制且无候选项的连锁窗口没有用户可做的选择。按上游
-		// SelectChain 协议提交 int32(-1)，避免把协议维护步骤暴露给界面。
-		const std::uint8_t pass_response[4]{0xff, 0xff, 0xff, 0xff};
-		OCG_DuelSetResponse(
-				static_cast<OCG_Duel>(duel_),
-				pass_response,
-				sizeof(pass_response));
+		if (pending_action_.kind == PendingActionKind::AutoPassChain) {
+			// 非强制且无候选项的连锁窗口没有用户可做的选择。按上游
+			// SelectChain 协议提交 int32(-1)，避免把协议维护步骤暴露给界面。
+			const std::uint8_t pass_response[4]{0xff, 0xff, 0xff, 0xff};
+			OCG_DuelSetResponse(
+					static_cast<OCG_Duel>(duel_),
+					pass_response,
+					sizeof(pass_response));
+		} else {
+			// 首版功能场确定性使用第一个合法区域。候选列表仍保留在解析模型中，
+			// 后续可直接改为由前端高亮并提交具体区域，而无需重新解释位掩码。
+			const PlaceOption &place = pending_action_.place_options.front();
+			const std::uint8_t place_response[3]{
+					place.player,
+					place.location,
+					place.sequence,
+			};
+			OCG_DuelSetResponse(
+					static_cast<OCG_Duel>(duel_),
+					place_response,
+					sizeof(place_response));
+			allow_auto_select_place_ = false;
+		}
 		pending_action_ = {};
 	}
-	if (pending_action_.kind == PendingActionKind::AutoPassChain) {
+	if (pending_action_.kind == PendingActionKind::AutoPassChain
+			|| pending_action_.kind == PendingActionKind::AutoSelectPlace) {
 		pending_action_ = {
 				PendingActionKind::Malformed,
 				-1,
@@ -272,6 +302,69 @@ ProcessResult DuelSession::submit_end_turn() {
 	// 高 16 位索引在此动作中固定为 0。
 	const std::uint8_t response[4]{7, 0, 0, 0};
 	last_submitted_action_ = pending_action_;
+	allow_auto_select_place_ = false;
+	OCG_DuelSetResponse(static_cast<OCG_Duel>(duel_), response, sizeof(response));
+	pending_action_ = {};
+	return process_once();
+}
+
+ProcessResult DuelSession::submit_idle_action(
+		const IdleActionKind kind,
+		const std::size_t index) {
+	if (!is_active()) {
+		return {false, OCG_DUEL_STATUS_END, "决斗尚未创建", {}};
+	}
+	if (pending_action_.kind != PendingActionKind::Idle) {
+		return {false, OCG_DUEL_STATUS_AWAITING, "当前不是空闲阶段动作选择", pending_action_};
+	}
+	const auto candidate = std::find_if(
+			pending_action_.idle_actions.begin(),
+			pending_action_.idle_actions.end(),
+			[kind, index](const IdleAction &action) {
+				return action.kind == kind && action.index == index;
+			});
+	if (candidate == pending_action_.idle_actions.end()) {
+		return {false, OCG_DUEL_STATUS_AWAITING, "动作不属于当前 OCGCore 候选列表", pending_action_};
+	}
+	if (index > 0xffffU) {
+		return {false, OCG_DUEL_STATUS_AWAITING, "动作索引超出 OCGCore 协议范围", pending_action_};
+	}
+
+	std::uint32_t action_type = 0;
+	switch (kind) {
+	case IdleActionKind::NormalSummon:
+		action_type = 0;
+		break;
+	case IdleActionKind::SpecialSummon:
+		action_type = 1;
+		break;
+	case IdleActionKind::Reposition:
+		action_type = 2;
+		break;
+	case IdleActionKind::MonsterSet:
+		action_type = 3;
+		break;
+	case IdleActionKind::SpellTrapSet:
+		action_type = 4;
+		break;
+	case IdleActionKind::Activate:
+		action_type = 5;
+		break;
+	}
+	const std::uint32_t packed =
+			(static_cast<std::uint32_t>(index) << 16U) | action_type;
+	const std::uint8_t response[4]{
+			static_cast<std::uint8_t>(packed & 0xffU),
+			static_cast<std::uint8_t>((packed >> 8U) & 0xffU),
+			static_cast<std::uint8_t>((packed >> 16U) & 0xffU),
+			static_cast<std::uint8_t>((packed >> 24U) & 0xffU),
+	};
+	last_submitted_action_ = pending_action_;
+	allow_auto_select_place_ =
+			kind == IdleActionKind::NormalSummon
+			|| kind == IdleActionKind::SpecialSummon
+			|| kind == IdleActionKind::MonsterSet
+			|| kind == IdleActionKind::SpellTrapSet;
 	OCG_DuelSetResponse(static_cast<OCG_Duel>(duel_), response, sizeof(response));
 	pending_action_ = {};
 	return process_once();
@@ -286,6 +379,90 @@ std::uint32_t DuelSession::query_count(
 	return OCG_DuelQueryCount(static_cast<OCG_Duel>(duel_), team, location);
 }
 
+std::vector<DuelCardSnapshot> DuelSession::query_cards(
+		const std::uint8_t team,
+		const std::uint32_t location) const {
+	std::vector<DuelCardSnapshot> cards;
+	if (!is_active() || team > 1 || location == 0
+			|| (location & (location - 1U)) != 0) {
+		return cards;
+	}
+
+	const OCG_QueryInfo query{
+			QUERY_CODE | QUERY_POSITION,
+			team,
+			location,
+			0,
+			0,
+	};
+	std::uint32_t length = 0;
+	const auto *buffer = static_cast<const std::uint8_t *>(
+			OCG_DuelQueryLocation(
+					static_cast<OCG_Duel>(duel_),
+					&length,
+					&query));
+	if (buffer == nullptr || length < sizeof(std::uint32_t)) {
+		return cards;
+	}
+
+	auto read_u16 = [](const std::uint8_t *data) {
+		return static_cast<std::uint16_t>(data[0])
+				| (static_cast<std::uint16_t>(data[1]) << 8U);
+	};
+	auto read_u32 = [](const std::uint8_t *data) {
+		return static_cast<std::uint32_t>(data[0])
+				| (static_cast<std::uint32_t>(data[1]) << 8U)
+				| (static_cast<std::uint32_t>(data[2]) << 16U)
+				| (static_cast<std::uint32_t>(data[3]) << 24U);
+	};
+
+	// QueryLocation 的首个 uint32 是其后负载长度。每个槽位由若干
+	// “uint16 块长 + uint32 查询标志 + 值”组成，并以 QUERY_END 结束。
+	// 任意越界或未知短块都使查询整体失败，避免把损坏数据展示为合法卡片。
+	const std::uint32_t payload_size = read_u32(buffer);
+	if (payload_size > length - sizeof(std::uint32_t)) {
+		return {};
+	}
+	std::size_t offset = sizeof(std::uint32_t);
+	const std::size_t end = offset + payload_size;
+	std::uint32_t sequence = 0;
+	DuelCardSnapshot card{0, 0, location, 0};
+	while (offset < end) {
+		if (end - offset < sizeof(std::uint16_t)) {
+			return {};
+		}
+		const std::uint16_t chunk_size = read_u16(buffer + offset);
+		offset += sizeof(std::uint16_t);
+		if (chunk_size == 0) {
+			++sequence;
+			card = {0, 0, location, sequence};
+			continue;
+		}
+		if (chunk_size < sizeof(std::uint32_t) || chunk_size > end - offset) {
+			return {};
+		}
+		const std::uint32_t flag = read_u32(buffer + offset);
+		if (flag == QUERY_END) {
+			if (card.card_id != 0) {
+				card.sequence = sequence;
+				cards.push_back(card);
+			}
+			++sequence;
+			card = {0, 0, location, sequence};
+		} else if (chunk_size >= 2 * sizeof(std::uint32_t)) {
+			const std::uint32_t value =
+					read_u32(buffer + offset + sizeof(std::uint32_t));
+			if (flag == QUERY_CODE) {
+				card.card_id = value;
+			} else if (flag == QUERY_POSITION) {
+				card.position = value;
+			}
+		}
+		offset += chunk_size;
+	}
+	return cards;
+}
+
 void DuelSession::destroy() noexcept {
 	if (duel_ == nullptr) {
 		return;
@@ -294,6 +471,7 @@ void DuelSession::destroy() noexcept {
 	duel_ = nullptr;
 	pending_action_ = {};
 	last_submitted_action_ = {};
+	allow_auto_select_place_ = false;
 }
 
 bool DuelSession::is_active() const noexcept {

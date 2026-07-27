@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <string>
+#include <vector>
 
 namespace ygo {
 
@@ -10,9 +11,38 @@ enum class PendingActionKind {
 	None,
 	Idle,
 	AutoPassChain,
+	AutoSelectPlace,
 	Retry,
 	Unsupported,
 	Malformed,
+};
+
+enum class IdleActionKind {
+	NormalSummon,
+	SpecialSummon,
+	Reposition,
+	MonsterSet,
+	SpellTrapSet,
+	Activate,
+};
+
+// 对应 MSG_SELECT_IDLECMD 六类候选中的一项。index 是该类别内部的下标，
+// 不是合并列表下标；提交响应时必须与 kind 一起使用。
+struct IdleAction {
+	IdleActionKind kind = IdleActionKind::NormalSummon;
+	std::size_t index = 0;
+	std::uint32_t card_id = 0;
+	std::uint8_t controller = 0;
+	std::uint8_t location = 0;
+	std::uint32_t sequence = 0;
+	std::uint64_t description = 0;
+	std::uint8_t client_mode = 0;
+};
+
+struct PlaceOption {
+	std::uint8_t player = 0;
+	std::uint8_t location = 0;
+	std::uint8_t sequence = 0;
 };
 
 // 描述 OCGCore 当前等待的玩家决策。该值类型不暴露原始缓冲区，调用方只能
@@ -23,6 +53,8 @@ struct PendingAction {
 	bool can_end_turn = false;
 	int message_type = -1;
 	std::string message = "当前没有待处理的玩家决策";
+	std::vector<IdleAction> idle_actions;
+	std::vector<PlaceOption> place_options;
 };
 
 // 解析 OCGCore_DuelGetMessage 返回的完整缓冲区。缓冲区由若干

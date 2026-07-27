@@ -31,6 +31,15 @@ struct ProcessResult {
 	PendingAction pending_action;
 };
 
+// OCGCore 区域查询返回的最小可视快照。这里只保留界面渲染和动作校验所需的
+// 稳定字段，不暴露 core 内部 card 指针；sequence 是该卡在目标区域中的槽位。
+struct DuelCardSnapshot {
+	std::uint32_t card_id = 0;
+	std::uint32_t position = 0;
+	std::uint32_t location = 0;
+	std::uint32_t sequence = 0;
+};
+
 class DuelSession final {
 public:
 	DuelSession(
@@ -60,12 +69,22 @@ public:
 	// 仅在解析器确认当前为空闲阶段且允许进入结束阶段时提交语义动作。
 	// 校验失败不会向 OCGCore 写入任何响应。
 	[[nodiscard]] ProcessResult submit_end_turn();
+	// 提交当前 MSG_SELECT_IDLECMD 快照中真实存在的候选。kind 和 index 必须
+	// 同时匹配，防止界面使用过期索引或跨类别索引驱动 OCGCore。
+	[[nodiscard]] ProcessResult submit_idle_action(
+			IdleActionKind kind,
+			std::size_t index);
 	[[nodiscard]] const PendingAction &pending_action() const noexcept {
 		return pending_action_;
 	}
 
 	// 查询某方某区域当前卡数。仅允许单区域查询（loc 需是 LOCATION_* 单位标志位）。
 	[[nodiscard]] std::uint32_t query_count(std::uint8_t team, std::uint32_t location) const;
+	// 查询某方单一区域的卡号、表示形式和槽位。返回值是同步复制的快照，
+	// 因为 OCGCore 返回的查询缓冲区只保证在下一次 core 调用前有效。
+	[[nodiscard]] std::vector<DuelCardSnapshot> query_cards(
+			std::uint8_t team,
+			std::uint32_t location) const;
 	void destroy() noexcept;
 	[[nodiscard]] bool is_active() const noexcept;
 
@@ -76,6 +95,9 @@ private:
 	void *duel_ = nullptr;
 	PendingAction pending_action_;
 	PendingAction last_submitted_action_;
+	// 只有召唤/盖放动作的紧随后续区域选择才允许确定性自动选区。
+	// 效果处理产生的选区必须交回上层，避免擅自替玩家决定效果目标。
+	bool allow_auto_select_place_ = false;
 
 	[[nodiscard]] ProcessResult process_once();
 };

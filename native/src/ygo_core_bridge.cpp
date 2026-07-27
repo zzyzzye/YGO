@@ -1,6 +1,7 @@
 #include "ygo/ygo_core_bridge.hpp"
 
 #include <godot_cpp/core/class_db.hpp>
+#include <godot_cpp/variant/array.hpp>
 #include <godot_cpp/variant/packed_string_array.hpp>
 #include <godot_cpp/variant/packed_int64_array.hpp>
 #include <godot_cpp/variant/string.hpp>
@@ -17,6 +18,73 @@ namespace ygo {
 
 namespace {
 
+const char *idle_action_kind_name(const IdleActionKind kind) {
+	switch (kind) {
+	case IdleActionKind::NormalSummon:
+		return "normal_summon";
+	case IdleActionKind::SpecialSummon:
+		return "special_summon";
+	case IdleActionKind::Reposition:
+		return "reposition";
+	case IdleActionKind::MonsterSet:
+		return "monster_set";
+	case IdleActionKind::SpellTrapSet:
+		return "spell_trap_set";
+	case IdleActionKind::Activate:
+		return "activate";
+	}
+	return "unknown";
+}
+
+godot::Dictionary card_to_dictionary(
+		const CardDatabase &database,
+		const DuelCardSnapshot &snapshot) {
+	godot::Dictionary item;
+	const CardRecord *card = database.find(snapshot.card_id);
+	if (card == nullptr) {
+		return item;
+	}
+	item["card_id"] = static_cast<std::int64_t>(snapshot.card_id);
+	item["id"] = static_cast<std::int64_t>(card->rule.code);
+	item["sequence"] = static_cast<std::int64_t>(snapshot.sequence);
+	item["location"] = static_cast<std::int64_t>(snapshot.location);
+	item["position"] = static_cast<std::int64_t>(snapshot.position);
+	item["cn_name"] = godot::String::utf8(card->display.cn_name.c_str());
+	item["types"] = godot::String::utf8(card->display.types_text.c_str());
+	item["description"] = godot::String::utf8(card->display.description.c_str());
+	item["image_path"] = godot::String::utf8(
+			("res://" + card->display.image_relative_path).c_str());
+	return item;
+}
+
+godot::Array cards_to_array(
+		const CardDatabase &database,
+		const std::vector<DuelCardSnapshot> &snapshots) {
+	godot::Array cards;
+	for (const DuelCardSnapshot &snapshot : snapshots) {
+		const godot::Dictionary item = card_to_dictionary(database, snapshot);
+		if (!item.is_empty()) {
+			cards.push_back(item);
+		}
+	}
+	return cards;
+}
+
+godot::Array hidden_cards_to_array(
+		const std::vector<DuelCardSnapshot> &snapshots) {
+	godot::Array cards;
+	for (const DuelCardSnapshot &snapshot : snapshots) {
+		godot::Dictionary item;
+		// 对手场上卡只公开槽位和表示形式。即使 OCGCore 查询接口能返回
+		// 内部卡号，桥接层也不能把里侧卡身份交给本地界面。
+		item["sequence"] = static_cast<std::int64_t>(snapshot.sequence);
+		item["location"] = static_cast<std::int64_t>(snapshot.location);
+		item["position"] = static_cast<std::int64_t>(snapshot.position);
+		cards.push_back(item);
+	}
+	return cards;
+}
+
 godot::Dictionary pending_action_to_dictionary(const PendingAction &pending) {
 	godot::Dictionary response;
 	switch (pending.kind) {
@@ -28,6 +96,9 @@ godot::Dictionary pending_action_to_dictionary(const PendingAction &pending) {
 		break;
 	case PendingActionKind::AutoPassChain:
 		response["kind"] = godot::String("auto_pass_chain");
+		break;
+	case PendingActionKind::AutoSelectPlace:
+		response["kind"] = godot::String("auto_select_place");
 		break;
 	case PendingActionKind::Retry:
 		response["kind"] = godot::String("retry");
@@ -43,6 +114,20 @@ godot::Dictionary pending_action_to_dictionary(const PendingAction &pending) {
 	response["can_end_turn"] = pending.can_end_turn;
 	response["message_type"] = pending.message_type;
 	response["message"] = godot::String::utf8(pending.message.c_str());
+	godot::Array idle_actions;
+	for (const auto &action : pending.idle_actions) {
+		godot::Dictionary item;
+		item["action_kind"] = godot::String(idle_action_kind_name(action.kind));
+		item["index"] = static_cast<std::int64_t>(action.index);
+		item["card_id"] = static_cast<std::int64_t>(action.card_id);
+		item["controller"] = action.controller;
+		item["location"] = action.location;
+		item["sequence"] = static_cast<std::int64_t>(action.sequence);
+		item["description"] = static_cast<std::int64_t>(action.description);
+		item["client_mode"] = action.client_mode;
+		idle_actions.push_back(item);
+	}
+	response["idle_actions"] = idle_actions;
 	return response;
 }
 
@@ -369,6 +454,66 @@ godot::Dictionary YgoCoreBridge::submit_end_turn() {
 			advance_to_player_decision(*session_, result));
 }
 
+godot::Dictionary YgoCoreBridge::submit_idle_action(
+		const godot::String &action_kind,
+		const std::int64_t index) {
+	if (!session_ || !session_->is_active()) {
+		return process_result_to_dictionary({
+				false,
+				OCG_DUEL_STATUS_END,
+				"决斗尚未创建",
+				{},
+		});
+	}
+	if (index < 0) {
+		return process_result_to_dictionary({
+				false,
+				OCG_DUEL_STATUS_AWAITING,
+				"动作索引不能为负数",
+				session_->pending_action(),
+		});
+	}
+	if (session_->pending_action().player != 0) {
+		return process_result_to_dictionary({
+				false,
+				OCG_DUEL_STATUS_AWAITING,
+				"当前不是本地玩家的操作回合",
+				session_->pending_action(),
+		});
+	}
+
+	const godot::CharString utf8 = action_kind.utf8();
+	const std::string kind_name = utf8.get_data();
+	IdleActionKind kind;
+	if (kind_name == "normal_summon") {
+		kind = IdleActionKind::NormalSummon;
+	} else if (kind_name == "special_summon") {
+		kind = IdleActionKind::SpecialSummon;
+	} else if (kind_name == "reposition") {
+		kind = IdleActionKind::Reposition;
+	} else if (kind_name == "monster_set") {
+		kind = IdleActionKind::MonsterSet;
+	} else if (kind_name == "spell_trap_set") {
+		kind = IdleActionKind::SpellTrapSet;
+	} else if (kind_name == "activate") {
+		kind = IdleActionKind::Activate;
+	} else {
+		return process_result_to_dictionary({
+				false,
+				OCG_DUEL_STATUS_AWAITING,
+				"未知的空闲阶段动作类型",
+				session_->pending_action(),
+		});
+	}
+	const ProcessResult result =
+			session_->submit_idle_action(kind, static_cast<std::size_t>(index));
+	if (!result.ok) {
+		return process_result_to_dictionary(result);
+	}
+	return process_result_to_dictionary(
+			advance_to_player_decision(*session_, result));
+}
+
 godot::Dictionary YgoCoreBridge::get_duel_state() const {
 	godot::Dictionary response;
 	if (!session_ || !session_->is_active()) {
@@ -391,6 +536,23 @@ godot::Dictionary YgoCoreBridge::get_duel_state() const {
 				session_->query_count(team, LOCATION_GRAVE));
 		state["banished"] = static_cast<std::int64_t>(
 				session_->query_count(team, LOCATION_REMOVED));
+		state["extra"] = static_cast<std::int64_t>(
+				session_->query_count(team, LOCATION_EXTRA));
+		// 手牌身份只交给其控制方使用；当前原型固定玩家1为本地玩家，因此
+		// 桥接层仅导出玩家1手牌，避免今后接入双端时意外泄漏对手隐藏信息。
+		if (team == 0) {
+			state["hand_cards"] = cards_to_array(
+					*database_,
+					session_->query_cards(team, LOCATION_HAND));
+		}
+		const auto monsters = session_->query_cards(team, LOCATION_MZONE);
+		const auto spells = session_->query_cards(team, LOCATION_SZONE);
+		state["monster_cards"] = team == 0
+				? cards_to_array(*database_, monsters)
+				: hidden_cards_to_array(monsters);
+		state["spell_trap_cards"] = team == 0
+				? cards_to_array(*database_, spells)
+				: hidden_cards_to_array(spells);
 		return state;
 	};
 
@@ -444,6 +606,9 @@ void YgoCoreBridge::_bind_methods() {
 	godot::ClassDB::bind_method(
 			godot::D_METHOD("submit_end_turn"),
 			&YgoCoreBridge::submit_end_turn);
+	godot::ClassDB::bind_method(
+			godot::D_METHOD("submit_idle_action", "action_kind", "index"),
+			&YgoCoreBridge::submit_idle_action);
 	godot::ClassDB::bind_method(
 			godot::D_METHOD("get_duel_state"),
 			&YgoCoreBridge::get_duel_state);

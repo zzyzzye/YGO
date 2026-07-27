@@ -8,6 +8,7 @@
 #include "ocgapi_constants.h"
 
 #include <array>
+#include <algorithm>
 #include <cassert>
 #include <cstdlib>
 #include <filesystem>
@@ -125,6 +126,15 @@ void test_fixed_real_decks_advance_to_second_players_idle_action() {
 	assert(session.query_count(0, LOCATION_HAND) == 5);
 	assert(session.query_count(1, LOCATION_DECK) == 35);
 	assert(session.query_count(1, LOCATION_HAND) == 5);
+	const std::vector<ygo::DuelCardSnapshot> opening_hand =
+			session.query_cards(0, LOCATION_HAND);
+	assert(opening_hand.size() == 5);
+	assert(std::all_of(
+			opening_hand.begin(),
+			opening_hand.end(),
+			[](const ygo::DuelCardSnapshot &card) {
+				return card.card_id != 0 && card.location == LOCATION_HAND;
+			}));
 	assert(process.pending_action.kind == ygo::PendingActionKind::Idle);
 	assert(process.pending_action.player == 0);
 	assert(process.pending_action.can_end_turn);
@@ -135,6 +145,39 @@ void test_fixed_real_decks_advance_to_second_players_idle_action() {
 	assert(rejected_step.pending_action.player == 0);
 	assert(session.query_count(0, LOCATION_DECK) == 35);
 	assert(session.query_count(0, LOCATION_HAND) == 5);
+
+	const auto monster_set = std::find_if(
+			process.pending_action.idle_actions.begin(),
+			process.pending_action.idle_actions.end(),
+			[](const ygo::IdleAction &action) {
+				return action.kind == ygo::IdleActionKind::MonsterSet;
+			});
+	assert(monster_set != process.pending_action.idle_actions.end());
+	const std::uint32_t selected_card_id = monster_set->card_id;
+
+	const ygo::ProcessResult invalid_action =
+			session.submit_idle_action(ygo::IdleActionKind::MonsterSet, 999);
+	assert(!invalid_action.ok);
+	assert(session.query_count(0, LOCATION_HAND) == 5);
+	assert(session.query_count(0, LOCATION_MZONE) == 0);
+
+	process = session.submit_idle_action(monster_set->kind, monster_set->index);
+	for (int step_index = 0;
+			step_index < 100
+			&& process.pending_action.kind == ygo::PendingActionKind::None;
+			++step_index) {
+		process = session.step();
+	}
+	assert(process.ok);
+	assert(session.query_count(0, LOCATION_HAND) == 4);
+	assert(session.query_count(0, LOCATION_MZONE) == 1);
+	const std::vector<ygo::DuelCardSnapshot> monster_zone =
+			session.query_cards(0, LOCATION_MZONE);
+	assert(monster_zone.size() == 1);
+	assert(monster_zone.front().card_id == selected_card_id);
+	assert(monster_zone.front().location == LOCATION_MZONE);
+	assert(process.pending_action.kind == ygo::PendingActionKind::Idle);
+	assert(selected_card_id != 0);
 
 	process = session.submit_end_turn();
 	for (int step_index = 0;
