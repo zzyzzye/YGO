@@ -13,6 +13,7 @@ var _attack_target_preview := false
 var _targetable := false
 var _target_selected := false
 var _card_selected := false
+var _chain_candidate := false
 # 这些固定节点由 zone_view.tscn 持有；脚本只绑定节点，避免运行时拼装稳定界面。
 @onready var card_container: CenterContainer = %CardContainer
 @onready var title_label: Label = %TitleLabel
@@ -52,6 +53,13 @@ func set_target_selected(value: bool) -> void:
 	_refresh_target_highlight()
 
 
+func set_chain_candidate(value: bool) -> void:
+	# 连锁候选拥有独立状态与 Theme variation，不借用攻击目标的 targetable。
+	# 规则快照切换时 DuelBoard 会统一传 false，避免旧卡位残留发动提示。
+	_chain_candidate = value
+	_refresh_target_highlight()
+
+
 func set_card_selected(value: bool) -> void:
 	# DuelBoard 只传递展示状态，真正的规则选择仍由 OCGCore 候选动作决定。
 	_card_selected = value
@@ -82,11 +90,13 @@ func clear_card() -> void:
 
 
 func _refresh_target_highlight() -> void:
-	target_highlight.visible = _attack_target_preview or _targetable
+	target_highlight.visible = _attack_target_preview or _targetable or _chain_candidate
 	if _target_selected:
 		target_highlight.theme_type_variation = &"TargetSelectedHighlight"
 	elif _targetable:
 		target_highlight.theme_type_variation = &"TargetHighlight"
+	elif _chain_candidate:
+		target_highlight.theme_type_variation = &"ChainCandidateHighlight"
 	else:
 		target_highlight.theme_type_variation = &"AttackTargetPreview"
 

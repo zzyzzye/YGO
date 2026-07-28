@@ -62,6 +62,8 @@ func _connect_board_signals() -> void:
 	board.card_selection_cancel_requested.connect(_on_card_selection_cancel_requested)
 	board.yes_no_requested.connect(_on_yes_no_requested)
 	board.position_requested.connect(_on_position_requested)
+	board.chain_requested.connect(_on_chain_requested)
+	board.chain_pass_requested.connect(_on_chain_pass_requested)
 	board.restart_requested.connect(_on_restart_requested)
 	board.exit_requested.connect(_on_exit_requested)
 
@@ -178,6 +180,7 @@ func _refresh_board(status_text: String, pending_override: Dictionary = {}) -> v
 		"local_player_turn": !game_over
 			and pending.get("kind", "none") in [
 				"idle", "battle", "yes_no", "select_card", "select_position",
+				"select_chain",
 			]
 			and int(pending.get("player", -1)) == 0,
 		"phase_kind": str(pending.get("kind", "none")),
@@ -191,6 +194,8 @@ func _refresh_board(status_text: String, pending_override: Dictionary = {}) -> v
 		"card_options": pending.get("card_options", []),
 		"selection_card_id": int(pending.get("selection_card_id", 0)),
 		"position_options": pending.get("position_options", []),
+		"chain_forced": bool(pending.get("chain_forced", false)),
+		"chain_options": pending.get("chain_options", []),
 		# DuelBoard 只能在 Main 已证明决策来源属于当前攻击流程时解释目标；
 		# false 的 SelectCard 仍保留在 Bridge pending 中，但不会获得攻击入口。
 		"attack_target_context_supported": _current_attack_target_context_supported,
@@ -387,6 +392,66 @@ func _on_position_requested(
 		)
 		return
 	_refresh_board("表示形式已提交，场面已由 OCGCore 更新")
+
+
+func _on_chain_requested(index: int, decision_generation: int) -> void:
+	if (
+		_submission_in_progress
+		or decision_generation != board._rule_decision_generation
+		or board._rule_decision_kind != "select_chain"
+		or !_current_chain_has_option(index)
+	):
+		return
+	_submit_chain_response("submit_chain", index)
+
+
+func _on_chain_pass_requested(decision_generation: int) -> void:
+	if (
+		_submission_in_progress
+		or decision_generation != board._rule_decision_generation
+		or board._rule_decision_kind != "select_chain"
+		or str(_current_pending_action.get("kind", "none")) != "select_chain"
+		or int(_current_pending_action.get("player", -1)) != 0
+		or bool(_current_pending_action.get("chain_forced", false))
+	):
+		return
+	_submit_chain_response("pass_chain")
+
+
+func _submit_chain_response(method_name: String, index: int = -1) -> void:
+	# 锁必须在同步 Bridge 调用前持有；测试双击、旧按钮或 Bridge 回调重入都只能
+	# 观察到锁定态。失败后不刷新快照，从而保留当前完整映射和按钮供玩家重试。
+	_submission_in_progress = true
+	var response: Dictionary = (
+		bridge.call(method_name, index)
+		if method_name == "submit_chain"
+		else bridge.call(method_name)
+	)
+	_submission_in_progress = false
+	if !bool(response.get("ok", false)):
+		board.show_status(
+			"连锁响应提交失败：" + str(response.get("message", "未知错误"))
+		)
+		return
+	if _restore_rejected_response(response):
+		return
+	_refresh_board(
+		"连锁效果已提交，场面已由 OCGCore 更新"
+		if method_name == "submit_chain"
+		else "已选择不连锁，场面已由 OCGCore 更新"
+	)
+
+
+func _current_chain_has_option(index: int) -> bool:
+	if (
+		str(_current_pending_action.get("kind", "none")) != "select_chain"
+		or int(_current_pending_action.get("player", -1)) != 0
+	):
+		return false
+	for option in _current_pending_action.get("chain_options", []):
+		if int(option.get("index", -1)) == index:
+			return true
+	return false
 
 
 func _submit_yes_no_response(accepted: bool, success_text: String) -> void:

@@ -15,6 +15,8 @@ signal attack_target_requested(option_index: int)
 signal card_selection_cancel_requested
 signal yes_no_requested(accepted: bool)
 signal position_requested(position: int, decision_generation: int)
+signal chain_requested(index: int, decision_generation: int)
+signal chain_pass_requested(decision_generation: int)
 
 var player_monster_zones: Array = []
 var player_spell_zones: Array = []
@@ -62,6 +64,10 @@ var _rule_decision_generation := 0
 # key 只由 OCGCore 公开的 controller/location/sequence 组成，值是同一决策帧中的
 # 候选 index；卡号不参与映射，避免同名卡或隐藏身份影响规则位置选择。
 var _card_option_indices: Dictionary = {}
+# 连锁候选按公开规则位置分组，同一位置允许多个效果。只有所有候选都能映射到
+# 当前真实 CardView 后才写入此表；空表表示整个窗口不可提交，绝不保留可映射子集。
+var _chain_options_by_location: Dictionary = {}
+var _chain_forced := false
 
 
 func _ready() -> void:
@@ -114,10 +120,16 @@ func _ready() -> void:
 		zone.card_selected.connect(_on_card_selected.bind(zone))
 		zone.card_hovered.connect(_preview_card)
 		zone.card_unhovered.connect(_on_card_unhovered)
-	# 对手怪兽始终连接同一个选择路由；路由只在当前 OCGCore 决策允许时发出
-	# “请求进入目标选择”或“提交候选索引”，普通浏览状态不会产生规则动作。
+	# 对手场区始终连接同一个选择路由；路由只在当前 OCGCore 决策允许时发出
+	# 攻击目标或连锁候选意图，普通浏览状态不会产生规则动作。
 	for zone in opponent_monster_zones:
-		zone.card_selected.connect(_route_opponent_monster_selection.bind(zone))
+		zone.card_selected.connect(
+			_route_opponent_field_selection.bind(zone, 1, 4)
+		)
+	for zone in opponent_spell_zones:
+		zone.card_selected.connect(
+			_route_opponent_field_selection.bind(zone, 1, 8)
+		)
 	for zone in opponent_monster_zones + opponent_spell_zones:
 		zone.card_hovered.connect(_preview_card)
 		zone.card_unhovered.connect(_on_card_unhovered)
@@ -168,7 +180,7 @@ func render_snapshot(snapshot: Dictionary) -> void:
 	_render_zone_cards(player_spell_zones, snapshot.get("player_spells", []))
 	_render_zone_cards(opponent_monster_zones, snapshot.get("opponent_monsters", []))
 	_render_zone_cards(opponent_spell_zones, snapshot.get("opponent_spells", []))
-	_bind_hidden_opponent_monster_inputs()
+	_bind_hidden_opponent_field_inputs()
 	_render_rule_decision(snapshot)
 
 
@@ -204,6 +216,78 @@ func _render_rule_decision(snapshot: Dictionary) -> void:
 			int(snapshot.get("selection_card_id", 0)),
 			snapshot.get("position_options", [])
 		)
+	elif kind == "select_chain":
+		_show_chain_options(snapshot)
+
+
+func _show_chain_options(snapshot: Dictionary) -> void:
+	var options: Array = snapshot.get("chain_options", [])
+	var mapped_nodes: Dictionary = {}
+	var grouped_options: Dictionary = {}
+	for option in options:
+		var location := _rule_location(option)
+		var candidate_node: Variant = _find_chain_candidate_node(location)
+		if candidate_node == null:
+			_rule_decision_kind = "select_chain_unmapped"
+			show_status("连锁候选无法完整映射到当前场面，请等待状态刷新")
+			return
+		var key := _rule_location_key(location)
+		if !grouped_options.has(key):
+			grouped_options[key] = []
+		grouped_options[key].append(option.duplicate(true))
+		mapped_nodes[key] = candidate_node
+
+	# 先完成全量映射，再一次性发布高亮与索引。若上面的任一项失败，界面看不到
+	# 部分候选，也没有“不连锁”捷径绕过当前异常快照。
+	_rule_decision_kind = "select_chain"
+	_chain_forced = bool(snapshot.get("chain_forced", false))
+	_chain_options_by_location = grouped_options
+	var hand_sequences: Dictionary = {}
+	for key in mapped_nodes:
+		var candidate_node = mapped_nodes[key]
+		if candidate_node is CardView and candidate_node.get_parent() == player_hand:
+			hand_sequences[int(candidate_node.card_data.get("sequence", -1))] = true
+		elif candidate_node is ZoneView:
+			candidate_node.set_chain_candidate(true)
+	player_hand.set_chain_candidate_sequences(hand_sequences)
+	if _chain_forced:
+		show_status("必须选择一个连锁效果")
+	else:
+		_restore_chain_pass()
+
+
+func _find_chain_candidate_node(location: Dictionary):
+	var controller := int(location.get("controller", -1))
+	var area := int(location.get("location", -1))
+	var sequence := int(location.get("sequence", -1))
+	if sequence < 0:
+		return null
+	if controller == 0 and area == 2:
+		for child in player_hand.get_children():
+			if (
+				child is CardView
+				and int(child.card_data.get("sequence", -1)) == sequence
+				and int(child.card_data.get("location", -1)) == 2
+			):
+				return child
+		return null
+	var zones: Array = []
+	if controller == 0 and area == 4:
+		zones = player_monster_zones
+	elif controller == 0 and area == 8:
+		zones = player_spell_zones
+	elif controller == 1 and area == 4:
+		zones = opponent_monster_zones
+	elif controller == 1 and area == 8:
+		zones = opponent_spell_zones
+	else:
+		return null
+	if sequence >= zones.size():
+		return null
+	var zone: ZoneView = zones[sequence]
+	if zone.card_container.get_child_count() != 1:
+		return null
+	return zone
 
 
 func _show_attack_route_choice() -> void:
@@ -301,7 +385,18 @@ func _clear_rule_decision_presentation() -> void:
 	_rule_decision_kind = "none"
 	_card_selection_cancelable = false
 	_card_option_indices.clear()
+	_chain_options_by_location.clear()
+	_chain_forced = false
 	direct_attack_highlight.visible = false
+	if player_hand != null:
+		player_hand.set_chain_candidate_sequences({})
+	for zone in (
+		player_monster_zones
+		+ player_spell_zones
+		+ opponent_monster_zones
+		+ opponent_spell_zones
+	):
+		zone.set_chain_candidate(false)
 	for zone in opponent_monster_zones:
 		zone.set_attack_target_preview(false)
 		zone.set_targetable(false)
@@ -369,20 +464,35 @@ func _render_zone_cards(zones: Array, cards: Array) -> void:
 			zones[sequence].show_card(card, !card.has("card_id"))
 
 
-func _bind_hidden_opponent_monster_inputs() -> void:
+func _bind_hidden_opponent_field_inputs() -> void:
 	# Bridge 会隐藏对手场上卡的 card_id，CardView 因而以卡背展示并主动抑制
-	# card_selected，防止对手手牌等隐藏信息被普通浏览选中。但攻击目标只需要
+	# card_selected，防止隐藏身份被普通浏览选中。但攻击目标和连锁候选都只需要
 	# controller/location/sequence，必须继续消费真实按钮的 pressed 输入。
-	# 这里只为隐藏的对手怪兽补规则路由；公开卡仍走 ZoneView 既有转发，避免双发。
+	# 这里只为隐藏的对手场区卡补规则路由；公开卡仍走 ZoneView 转发，避免双发。
 	for zone in opponent_monster_zones:
 		if zone.card_container.get_child_count() != 1:
 			continue
 		var card: CardView = zone.card_container.get_child(0)
 		if card.face_down:
-			card.pressed.connect(_route_hidden_opponent_monster_press.bind(card, zone))
+			card.pressed.connect(
+				_route_hidden_opponent_field_press.bind(card, zone, 1, 4)
+			)
+	for zone in opponent_spell_zones:
+		if zone.card_container.get_child_count() != 1:
+			continue
+		var card: CardView = zone.card_container.get_child(0)
+		if card.face_down:
+			card.pressed.connect(
+				_route_hidden_opponent_field_press.bind(card, zone, 1, 8)
+			)
 
 
-func _route_hidden_opponent_monster_press(card: CardView, source_zone: ZoneView) -> void:
+func _route_hidden_opponent_field_press(
+	card: CardView,
+	source_zone: ZoneView,
+	controller: int,
+	location: int
+) -> void:
 	# 新快照会同步把旧 CardView 移出容器；即使外部仍持有并触发旧按钮，也不能
 	# 把上一帧位置重新送入当前规则决策。
 	if (
@@ -392,12 +502,15 @@ func _route_hidden_opponent_monster_press(card: CardView, source_zone: ZoneView)
 		or source_zone.card_container.get_child(0) != card
 	):
 		return
-	_route_opponent_monster_selection(card.card_data, source_zone)
+	_route_opponent_field_selection(card.card_data, source_zone, controller, location)
 
 
 func _on_card_selected(card_data: Dictionary, source_zone: ZoneView = null) -> void:
 	if card_data.is_empty():
 		_unlock_selection()
+		return
+	if _rule_decision_kind == "select_chain":
+		_select_chain_card(_rule_location(card_data), card_data, source_zone)
 		return
 	selected_card = card_data
 	if source_zone != null and player_hand != null:
@@ -407,13 +520,22 @@ func _on_card_selected(card_data: Dictionary, source_zone: ZoneView = null) -> v
 	_rebuild_action_buttons()
 
 
-func _route_opponent_monster_selection(
+func _route_opponent_field_selection(
 	card_data: Dictionary,
-	source_zone: ZoneView
+	source_zone: ZoneView,
+	controller: int = 1,
+	location_kind: int = 4
 ) -> void:
 	if card_data.is_empty():
 		return
-	var location := _opponent_monster_rule_location(card_data)
+	var location := {
+		"controller": controller,
+		"location": location_kind,
+		"sequence": int(card_data.get("sequence", -1)),
+	}
+	if _rule_decision_kind == "select_chain":
+		_select_chain_card(location, card_data, source_zone)
+		return
 	if _rule_decision_kind == "attack_route":
 		if (
 			source_zone.target_highlight.visible
@@ -430,6 +552,32 @@ func _route_opponent_monster_selection(
 		and source_zone.target_highlight.theme_type_variation == &"TargetHighlight"
 	):
 		attack_target_requested.emit(int(option_index))
+
+
+func _select_chain_card(
+	location: Dictionary,
+	card_data: Dictionary,
+	source_zone: ZoneView = null
+) -> void:
+	var key := _rule_location_key(location)
+	if !_chain_options_by_location.has(key):
+		# HandView 会先更新自己的选中框再转发点击；若该卡不是当前连锁候选，
+		# 必须同时撤销旧效果按钮和这次无效选中，避免视觉卡牌与可提交效果错位。
+		_clear_selection()
+		return
+	# 对手里侧卡的快照可能只公开 sequence。controller/location 由已命中的真实
+	# ZoneView 语义补齐，仅用于当前候选分组键；不得把候选中的 card_id 回填到卡面。
+	selected_card = card_data.duplicate(true)
+	selected_card["controller"] = int(location.get("controller", -1))
+	selected_card["location"] = int(location.get("location", -1))
+	selected_card["sequence"] = int(location.get("sequence", -1))
+	if source_zone == null:
+		_set_field_card_selection(null)
+	else:
+		player_hand.clear_selection()
+		_set_field_card_selection(source_zone if int(location.controller) == 0 else null)
+	_show_card_detail(selected_card)
+	_rebuild_action_buttons()
 
 
 func _on_opponent_status_input(event: InputEvent) -> void:
@@ -489,6 +637,28 @@ func _hide_card_detail() -> void:
 
 func _rebuild_action_buttons() -> void:
 	_clear_dynamic_children(action_box)
+	if _rule_decision_kind == "select_chain":
+		var options: Array = _chain_options_by_location.get(
+			_rule_location_key(selected_card),
+			[]
+		)
+		for effect_index in range(options.size()):
+			var option: Dictionary = options[effect_index]
+			var button := Button.new()
+			button.text = "发动效果 %s（描述 %s）" % [
+				effect_index + 1,
+				int(option.get("description", 0)),
+			]
+			button.pressed.connect(
+				_emit_chain.bind(
+					int(option.get("index", -1)),
+					_rule_decision_generation
+				)
+			)
+			action_box.add_child(button)
+		_restore_chain_pass()
+		action_box.visible = action_box.get_child_count() > 0
+		return
 	if _rule_decision_kind == "select_card":
 		action_box.visible = false
 		_restore_card_selection_cancel()
@@ -520,6 +690,35 @@ func _rebuild_action_buttons() -> void:
 		cancel.pressed.connect(_clear_selection)
 		action_box.add_child(cancel)
 	action_box.visible = matched > 0
+
+
+func _restore_chain_pass() -> void:
+	if _rule_decision_kind != "select_chain" or _chain_forced:
+		return
+	var pass_button := Button.new()
+	pass_button.text = "不连锁"
+	pass_button.pressed.connect(
+		_emit_chain_pass.bind(_rule_decision_generation)
+	)
+	action_box.add_child(pass_button)
+	action_box.visible = true
+
+
+func _emit_chain(index: int, decision_generation: int) -> void:
+	if (
+		_rule_decision_kind == "select_chain"
+		and decision_generation == _rule_decision_generation
+	):
+		chain_requested.emit(index, decision_generation)
+
+
+func _emit_chain_pass(decision_generation: int) -> void:
+	if (
+		_rule_decision_kind == "select_chain"
+		and !_chain_forced
+		and decision_generation == _rule_decision_generation
+	):
+		chain_pass_requested.emit(decision_generation)
 
 
 func _action_label(kind: String) -> String:
@@ -555,6 +754,7 @@ func _clear_selection() -> void:
 	_clear_dynamic_children(action_box)
 	action_box.visible = false
 	_restore_card_selection_cancel()
+	_restore_chain_pass()
 	_hide_card_detail()
 
 
@@ -568,6 +768,7 @@ func _unlock_selection() -> void:
 	_clear_dynamic_children(action_box)
 	action_box.visible = false
 	_restore_card_selection_cancel()
+	_restore_chain_pass()
 	if _hovered_card.is_empty():
 		_hide_card_detail()
 	else:
@@ -616,8 +817,8 @@ func _request_exit() -> void:
 
 
 func _open_confirmation(kind: String, message: String) -> void:
-	# restart/exit 属于本地工具确认，不能覆盖 OCGCore 正在等待的 YesNo、
-	# SelectCard 或攻击路线入口；只有新规则快照清理后才允许打开普通确认。
+	# restart/exit 属于本地工具确认，不能覆盖 OCGCore 正在等待的任何规则决策；
+	# 只有新快照清理 YesNo、卡牌/表示形式/连锁等入口后才允许打开普通确认。
 	if _rule_decision_kind != "none":
 		return
 	_confirmation_kind = kind
