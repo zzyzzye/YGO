@@ -1,8 +1,13 @@
 #include "test_support.hpp"
 #include "ygo/card_database.hpp"
 #include "ygo/card_repository.hpp"
-#include "ygo/duel_session.hpp"
+#include "ygo/duel_message_parser.hpp"
+#include "ygo/ocg_card_data_adapter.hpp"
 #include "ygo/official_script_loader.hpp"
+
+#define private public
+#include "ygo/duel_session.hpp"
+#undef private
 
 #include "ocgapi.h"
 #include "ocgapi_constants.h"
@@ -217,6 +222,20 @@ void test_fixed_real_decks_advance_to_second_players_idle_action() {
 	assert(process.pending_action.player == 0);
 	assert(process.pending_action.can_end_turn);
 
+	const ygo::PendingAction idle_snapshot = session.pending_action();
+	const ygo::ProcessResult invalid_yes_no = session.submit_yes_no(true);
+	assert(!invalid_yes_no.ok);
+	assert(invalid_yes_no.message == "当前不是是非选择");
+	assert(invalid_yes_no.pending_action.kind == idle_snapshot.kind);
+	assert(invalid_yes_no.pending_action.player == idle_snapshot.player);
+	assert(invalid_yes_no.pending_action.message_type == idle_snapshot.message_type);
+	assert(invalid_yes_no.pending_action.idle_actions.size()
+			== idle_snapshot.idle_actions.size());
+	assert(session.pending_action().kind == idle_snapshot.kind);
+	assert(session.pending_action().player == idle_snapshot.player);
+	assert(session.pending_action().idle_actions.size()
+			== idle_snapshot.idle_actions.size());
+
 	const ygo::ProcessResult rejected_step = session.step();
 	assert(!rejected_step.ok);
 	assert(rejected_step.pending_action.kind == ygo::PendingActionKind::Idle);
@@ -342,6 +361,65 @@ void test_fixed_real_decks_advance_to_second_players_idle_action() {
 			static_cast<int>(replay.query_count(1, LOCATION_HAND)),
 	};
 	assert(replay_trace == first_trace);
+
+	// 先消耗本回合的一次通常召唤，使真实 OCGCore 的下一份 Idle 快照不再
+	// 接受 type=0/index=0。随后仅注入待提交语义快照，并通过公共接口提交；
+	// SelectCard 的 type=0 会被真实 Idle Processor 拒绝并产生 MSG_RETRY。
+	const auto replay_summon = std::find_if(
+			replay_process.pending_action.idle_actions.begin(),
+			replay_process.pending_action.idle_actions.end(),
+			[](const ygo::IdleAction &action) {
+				return action.kind == ygo::IdleActionKind::NormalSummon;
+			});
+	assert(replay_summon != replay_process.pending_action.idle_actions.end());
+	replay_process = replay.submit_idle_action(
+			replay_summon->kind,
+			replay_summon->index);
+	for (int step_index = 0;
+			step_index < 100
+			&& replay_process.pending_action.kind == ygo::PendingActionKind::None;
+			++step_index) {
+		replay_process = replay.step();
+	}
+	assert(replay_process.pending_action.kind == ygo::PendingActionKind::Idle);
+
+	ygo::PendingAction submitted;
+	submitted.kind = ygo::PendingActionKind::SelectCard;
+	submitted.player = 1;
+	submitted.message_type = MSG_SELECT_CARD;
+	submitted.message = "请选择攻击目标";
+	submitted.cancelable = true;
+	submitted.min_select = 1;
+	submitted.max_select = 1;
+	submitted.card_options = {
+			{0, 100, 0, LOCATION_MZONE, 2, POS_FACEUP_ATTACK},
+			{1, 200, 0, LOCATION_MZONE, 4, POS_FACEUP_DEFENSE},
+	};
+	replay.last_submitted_action_ = {};
+	replay.pending_action_ = submitted;
+
+	const ygo::ProcessResult retry = replay.submit_card_selection(0);
+	assert(retry.pending_action.kind == ygo::PendingActionKind::SelectCard);
+	assert(retry.pending_action.player == submitted.player);
+	assert(retry.pending_action.message_type == submitted.message_type);
+	assert(retry.pending_action.message == submitted.message);
+	assert(retry.pending_action.cancelable == submitted.cancelable);
+	assert(retry.pending_action.min_select == submitted.min_select);
+	assert(retry.pending_action.max_select == submitted.max_select);
+	assert(retry.pending_action.card_options.size() == 2);
+	assert(retry.pending_action.card_options[0].index == 0);
+	assert(retry.pending_action.card_options[0].card_id == 100);
+	assert(retry.pending_action.card_options[0].sequence == 2);
+	assert(retry.pending_action.card_options[1].index == 1);
+	assert(retry.pending_action.card_options[1].card_id == 200);
+	assert(retry.pending_action.card_options[1].sequence == 4);
+
+	const ygo::ProcessResult stale =
+			replay.submit_card_selection(99);
+	assert(!stale.ok);
+	assert(stale.message == "卡牌候选不属于当前 OCGCore 候选列表");
+	assert(stale.pending_action.kind == ygo::PendingActionKind::SelectCard);
+	assert(stale.pending_action.card_options.size() == 2);
 }
 
 void test_full_local_assets_when_requested() {

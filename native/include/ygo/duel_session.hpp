@@ -81,6 +81,11 @@ public:
 	[[nodiscard]] ProcessResult submit_battle_action(
 			BattleActionKind kind,
 			std::size_t index);
+	// 是非与卡牌选择只接受当前解析快照中的语义输入。Session 独占协议组包
+	// 和 OCGCore 提交，界面不能绕过候选、类型或取消能力门禁。
+	[[nodiscard]] ProcessResult submit_yes_no(bool accepted);
+	[[nodiscard]] ProcessResult submit_card_selection(std::size_t option_index);
+	[[nodiscard]] ProcessResult cancel_card_selection();
 	// 分别对应 MSG_SELECT_BATTLECMD 的 type=2（主要阶段二）和 type=3（结束）。
 	[[nodiscard]] ProcessResult submit_enter_main2();
 	[[nodiscard]] ProcessResult submit_end_battle();

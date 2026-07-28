@@ -85,7 +85,10 @@ set_source_files_properties("${OCGCORE_DIR}/processor_visit.cpp" PROPERTIES
 	COMPILE_OPTIONS "-fno-exceptions"
 )
 
-add_library(ygo_duel_session STATIC src/duel_session.cpp)
+add_library(ygo_duel_session STATIC
+	src/duel_response.cpp
+	src/duel_session.cpp
+)
 target_include_directories(ygo_duel_session PUBLIC include)
 target_link_libraries(ygo_duel_session PUBLIC
 	ocgcore
@@ -123,6 +126,10 @@ add_test(NAME duel_session_lifecycle COMMAND test_duel_session)
 add_library(ygo_duel_message_parser STATIC src/duel_message_parser.cpp)
 target_include_directories(ygo_duel_message_parser PUBLIC include)
 target_link_libraries(ygo_duel_message_parser PUBLIC ocgcore)
+
+add_executable(test_duel_response tests/test_duel_response.cpp)
+target_link_libraries(test_duel_response PRIVATE ygo_duel_session)
+add_test(NAME duel_response COMMAND test_duel_response)
 
 add_executable(test_duel_message_parser tests/test_duel_message_parser.cpp)
 target_link_libraries(test_duel_message_parser PRIVATE ygo_duel_message_parser)

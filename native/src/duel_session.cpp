@@ -1,4 +1,5 @@
 #include "ygo/duel_session.hpp"
+#include "ygo/duel_response.hpp"
 
 #include "ocgapi.h"
 #include "ocgapi_constants.h"
@@ -231,9 +232,10 @@ ProcessResult DuelSession::process_once() {
 		}
 		if (pending_action_.kind == PendingActionKind::Retry
 				&& last_submitted_action_.kind != PendingActionKind::None) {
-			pending_action_.player = last_submitted_action_.player;
-			pending_action_.message += "；上一动作来自玩家"
-					+ std::to_string(last_submitted_action_.player + 1);
+			// MSG_RETRY 本身不重复携带原决策字段。必须恢复提交前的完整
+			// 不可变快照，尤其是 SelectCard 候选与取消约束；否则界面既
+			// 无法重新展示合法选择，也可能用过期索引绕过语义门禁。
+			pending_action_ = last_submitted_action_;
 		} else if (pending_action_.kind != PendingActionKind::None
 				&& pending_action_.kind != PendingActionKind::AutoPassChain) {
 			last_submitted_action_ = {};
@@ -442,6 +444,82 @@ ProcessResult DuelSession::submit_battle_action(
 	last_submitted_action_ = pending_action_;
 	allow_auto_select_place_ = false;
 	OCG_DuelSetResponse(static_cast<OCG_Duel>(duel_), response, sizeof(response));
+	pending_action_ = {};
+	return process_once();
+}
+
+ProcessResult DuelSession::submit_yes_no(const bool accepted) {
+	if (!is_active()) {
+		return {false, OCG_DUEL_STATUS_END, "决斗尚未创建", {}};
+	}
+	const DuelResponse response =
+			build_yes_no_response(pending_action_, accepted);
+	if (!response.ok) {
+		return {
+				false,
+				OCG_DUEL_STATUS_AWAITING,
+				response.message,
+				pending_action_,
+		};
+	}
+
+	last_submitted_action_ = pending_action_;
+	allow_auto_select_place_ = false;
+	OCG_DuelSetResponse(
+			static_cast<OCG_Duel>(duel_),
+			response.bytes.data(),
+			static_cast<std::uint32_t>(response.bytes.size()));
+	pending_action_ = {};
+	return process_once();
+}
+
+ProcessResult DuelSession::submit_card_selection(
+		const std::size_t option_index) {
+	if (!is_active()) {
+		return {false, OCG_DUEL_STATUS_END, "决斗尚未创建", {}};
+	}
+	const DuelResponse response =
+			build_card_selection_response(pending_action_, option_index);
+	if (!response.ok) {
+		return {
+				false,
+				OCG_DUEL_STATUS_AWAITING,
+				response.message,
+				pending_action_,
+		};
+	}
+
+	last_submitted_action_ = pending_action_;
+	allow_auto_select_place_ = false;
+	OCG_DuelSetResponse(
+			static_cast<OCG_Duel>(duel_),
+			response.bytes.data(),
+			static_cast<std::uint32_t>(response.bytes.size()));
+	pending_action_ = {};
+	return process_once();
+}
+
+ProcessResult DuelSession::cancel_card_selection() {
+	if (!is_active()) {
+		return {false, OCG_DUEL_STATUS_END, "决斗尚未创建", {}};
+	}
+	const DuelResponse response =
+			build_card_selection_cancel_response(pending_action_);
+	if (!response.ok) {
+		return {
+				false,
+				OCG_DUEL_STATUS_AWAITING,
+				response.message,
+				pending_action_,
+		};
+	}
+
+	last_submitted_action_ = pending_action_;
+	allow_auto_select_place_ = false;
+	OCG_DuelSetResponse(
+			static_cast<OCG_Duel>(duel_),
+			response.bytes.data(),
+			static_cast<std::uint32_t>(response.bytes.size()));
 	pending_action_ = {};
 	return process_once();
 }
