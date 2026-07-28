@@ -11,6 +11,8 @@ enum class PendingActionKind {
 	None,
 	Idle,
 	Battle,
+	YesNo,
+	SelectCard,
 	AutoPassChain,
 	AutoSelectPlace,
 	Retry,
@@ -49,6 +51,17 @@ struct PlaceOption {
 	std::uint8_t player = 0;
 	std::uint8_t location = 0;
 	std::uint8_t sequence = 0;
+};
+
+// 对应 MSG_SELECT_CARD 的一项候选。index 是 OCGCore 候选表中的稳定下标，
+// 响应层只能提交该下标，不能根据卡片编号或场上位置自行重新匹配候选。
+struct CardSelectionOption {
+	std::size_t index = 0;
+	std::uint32_t card_id = 0;
+	std::uint8_t controller = 0;
+	std::uint8_t location = 0;
+	std::uint32_t sequence = 0;
+	std::uint32_t position = 0;
 };
 
 // 对应 MSG_SELECT_BATTLECMD 中的可发动效果或可攻击怪兽。攻击动作的
@@ -97,6 +110,15 @@ struct PendingAction {
 	std::vector<LifePointEvent> life_point_events;
 	int winner = -1;
 	int win_reason = -1;
+	// MSG_SELECT_YESNO 的 OCGCore 描述编号。其语义由上层文案表解释，0 是
+	// 未携带描述的默认值，不能与任意具体问题混用。
+	std::uint64_t description = 0;
+	// MSG_SELECT_CARD 的协议选择约束。只有 SelectCard 时这些字段才有意义；
+	// 解析失败不会暴露半成品候选，调用方可据此安全地拒绝响应。
+	bool cancelable = false;
+	std::uint32_t min_select = 0;
+	std::uint32_t max_select = 0;
+	std::vector<CardSelectionOption> card_options;
 };
 
 // 解析 OCGCore_DuelGetMessage 返回的完整缓冲区。缓冲区由若干

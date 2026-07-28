@@ -250,6 +250,114 @@ ygo::PendingAction parse_battle_message(
 	return pending;
 }
 
+ygo::PendingAction malformed_yes_no_message() {
+	return {
+			ygo::PendingActionKind::Malformed,
+			-1,
+			false,
+			MSG_SELECT_YESNO,
+			"是/否选择消息长度不足，无法安全解析",
+	};
+}
+
+ygo::PendingAction parse_yes_no_message(
+		const std::uint8_t *data,
+		const std::size_t size) {
+	ByteReader reader(data, size);
+	std::uint8_t message_type = 0;
+	std::uint8_t player = 0;
+	std::uint64_t description = 0;
+	if (!reader.read_u8(message_type)
+			|| !reader.read_u8(player)
+			|| !reader.read_u64(description)) {
+		return malformed_yes_no_message();
+	}
+	if (player > 1) {
+		return {
+				ygo::PendingActionKind::Malformed,
+				-1,
+				false,
+				MSG_SELECT_YESNO,
+				"是/否选择消息包含非法玩家编号",
+		};
+	}
+
+	ygo::PendingAction pending{
+			ygo::PendingActionKind::YesNo,
+			static_cast<int>(player),
+			false,
+			MSG_SELECT_YESNO,
+			"等待玩家确认是或否",
+	};
+	pending.description = description;
+	return pending;
+}
+
+ygo::PendingAction malformed_select_card_message() {
+	return {
+			ygo::PendingActionKind::Malformed,
+			-1,
+			false,
+			MSG_SELECT_CARD,
+			"卡牌选择消息长度不足或字段非法，无法安全解析",
+	};
+}
+
+ygo::PendingAction parse_select_card_message(
+		const std::uint8_t *data,
+		const std::size_t size) {
+	ByteReader reader(data, size);
+	std::uint8_t message_type = 0;
+	std::uint8_t player = 0;
+	std::uint8_t cancelable = 0;
+	std::uint32_t min_select = 0;
+	std::uint32_t max_select = 0;
+	std::uint32_t candidate_count = 0;
+	if (!reader.read_u8(message_type)
+			|| !reader.read_u8(player)
+			|| !reader.read_u8(cancelable)
+			|| !reader.read_u32(min_select)
+			|| !reader.read_u32(max_select)
+			|| !reader.read_u32(candidate_count)) {
+		return malformed_select_card_message();
+	}
+	// OCGCore 的 cancelable 仅允许布尔值，选择上下限必须能由本帧候选满足；
+	// 在读取 loc_info 前拒绝矛盾范围，避免异常数量触发无意义的大量分配。
+	if (player > 1 || cancelable > 1 || min_select > max_select
+			|| max_select > candidate_count) {
+		return malformed_select_card_message();
+	}
+
+	std::vector<ygo::CardSelectionOption> options;
+	options.reserve(candidate_count);
+	for (std::uint32_t index = 0; index < candidate_count; ++index) {
+		ygo::CardSelectionOption option;
+		option.index = index;
+		if (!reader.read_u32(option.card_id)
+				|| !reader.read_u8(option.controller)
+				|| !reader.read_u8(option.location)
+				|| !reader.read_u32(option.sequence)
+				|| !reader.read_u32(option.position)) {
+			return malformed_select_card_message();
+		}
+		options.push_back(option);
+	}
+
+	ygo::PendingAction pending{
+			ygo::PendingActionKind::SelectCard,
+			static_cast<int>(player),
+			false,
+			MSG_SELECT_CARD,
+			"等待玩家选择卡牌",
+	};
+	pending.cancelable = cancelable != 0;
+	pending.min_select = min_select;
+	pending.max_select = max_select;
+	// 只有所有 loc_info 读取成功后才将候选交给调用方，畸形帧不能泄露半成品。
+	pending.card_options = std::move(options);
+	return pending;
+}
+
 ygo::PendingAction parse_chain_message(
 		const std::uint8_t *data,
 		const std::size_t size) {
@@ -378,9 +486,7 @@ bool requires_player_response(const std::uint8_t message_type) {
 	switch (message_type) {
 	case MSG_SELECT_BATTLECMD:
 	case MSG_SELECT_EFFECTYN:
-	case MSG_SELECT_YESNO:
 	case MSG_SELECT_OPTION:
-	case MSG_SELECT_CARD:
 	case MSG_SELECT_CHAIN:
 	case MSG_SELECT_PLACE:
 	case MSG_SELECT_POSITION:
@@ -474,6 +580,10 @@ PendingAction parse_pending_action(
 			pending = parse_idle_message(frame, frame_size);
 		} else if (frame[0] == MSG_SELECT_BATTLECMD) {
 			pending = parse_battle_message(frame, frame_size);
+		} else if (frame[0] == MSG_SELECT_YESNO) {
+			pending = parse_yes_no_message(frame, frame_size);
+		} else if (frame[0] == MSG_SELECT_CARD) {
+			pending = parse_select_card_message(frame, frame_size);
 		} else if (frame[0] == MSG_SELECT_CHAIN) {
 			pending = parse_chain_message(frame, frame_size);
 		} else if (frame[0] == MSG_SELECT_PLACE) {

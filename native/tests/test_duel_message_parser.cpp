@@ -27,6 +27,28 @@ void append_frame(
 	stream.insert(stream.end(), message.begin(), message.end());
 }
 
+std::vector<std::uint8_t> framed(const std::vector<std::uint8_t> &message) {
+	std::vector<std::uint8_t> stream;
+	append_frame(stream, message);
+	return stream;
+}
+
+void append_card_option(
+		std::vector<std::uint8_t> &message,
+		const std::uint32_t card_id,
+		const std::uint8_t controller,
+		const std::uint8_t location,
+		const std::uint32_t sequence,
+		const std::uint32_t position) {
+	// MSG_SELECT_CARD 的每个候选固定携带卡片编号和 loc_info。测试夹具逐字段
+	// 写入协议值，以便捕获生产代码对 sequence 或 position 宽度的误读。
+	append_little_endian<std::uint32_t>(message, card_id);
+	message.push_back(controller);
+	message.push_back(location);
+	append_little_endian<std::uint32_t>(message, sequence);
+	append_little_endian<std::uint32_t>(message, position);
+}
+
 void test_notification_before_idle_action_does_not_hide_pending_player() {
 	std::vector<std::uint8_t> stream;
 	append_frame(stream, {MSG_NEW_TURN, 0});
@@ -126,15 +148,122 @@ void test_truncated_frame_is_reported_as_malformed() {
 	assert(pending.kind == ygo::PendingActionKind::Malformed);
 }
 
-void test_unimplemented_interactive_message_is_not_silently_ignored() {
-	std::vector<std::uint8_t> stream;
-	// MSG_SELECT_YESNO 需要玩家响应，但不属于当前里程碑支持的动作。
-	append_frame(stream, {MSG_SELECT_YESNO, 0, 0, 0, 0, 0, 0, 0, 0, 0});
+void test_yes_no_message_exposes_player_and_description() {
+	std::vector<std::uint8_t> yes_no{MSG_SELECT_YESNO, 0};
+	append_little_endian<std::uint64_t>(yes_no, 31);
+	const std::vector<std::uint8_t> stream = framed(yes_no);
+	const ygo::PendingAction pending =
+			ygo::parse_pending_action(stream.data(), stream.size());
+	assert(pending.kind == ygo::PendingActionKind::YesNo);
+	assert(pending.player == 0);
+	assert(pending.description == 31);
+	assert(pending.message_type == MSG_SELECT_YESNO);
+}
+
+void test_yes_no_rejects_invalid_player_and_truncated_description() {
+	std::vector<std::uint8_t> invalid_player{MSG_SELECT_YESNO, 2};
+	append_little_endian<std::uint64_t>(invalid_player, 31);
+	const std::vector<std::uint8_t> invalid_player_stream = framed(invalid_player);
+	const ygo::PendingAction invalid_player_pending =
+			ygo::parse_pending_action(
+				invalid_player_stream.data(), invalid_player_stream.size());
+	assert(invalid_player_pending.kind == ygo::PendingActionKind::Malformed);
+	assert(invalid_player_pending.message
+			== "是/否选择消息包含非法玩家编号");
+
+	const std::vector<std::uint8_t> truncated_stream =
+			framed({MSG_SELECT_YESNO, 0, 31, 0, 0, 0, 0, 0, 0});
+	const ygo::PendingAction truncated_pending =
+			ygo::parse_pending_action(
+				truncated_stream.data(), truncated_stream.size());
+	assert(truncated_pending.kind == ygo::PendingActionKind::Malformed);
+	assert(truncated_pending.message
+			== "是/否选择消息长度不足，无法安全解析");
+}
+
+void test_select_card_exposes_single_card_candidates() {
+	std::vector<std::uint8_t> select{MSG_SELECT_CARD, 0, 1};
+	append_little_endian<std::uint32_t>(select, 1);
+	append_little_endian<std::uint32_t>(select, 1);
+	append_little_endian<std::uint32_t>(select, 2);
+	append_card_option(select, 123, 1, LOCATION_MZONE, 0, POS_FACEUP_ATTACK);
+	append_card_option(select, 456, 1, LOCATION_MZONE, 4, POS_FACEUP_DEFENSE);
+	const std::vector<std::uint8_t> stream = framed(select);
 
 	const ygo::PendingAction pending =
 			ygo::parse_pending_action(stream.data(), stream.size());
-	assert(pending.kind == ygo::PendingActionKind::Unsupported);
-	assert(pending.message_type == MSG_SELECT_YESNO);
+	assert(pending.kind == ygo::PendingActionKind::SelectCard);
+	assert(pending.player == 0);
+	assert(pending.cancelable);
+	assert(pending.min_select == 1);
+	assert(pending.max_select == 1);
+	assert(pending.card_options.size() == 2);
+	assert(pending.card_options[0].index == 0);
+	assert(pending.card_options[0].card_id == 123);
+	assert(pending.card_options[0].controller == 1);
+	assert(pending.card_options[0].location == LOCATION_MZONE);
+	assert(pending.card_options[0].sequence == 0);
+	assert(pending.card_options[0].position == POS_FACEUP_ATTACK);
+	assert(pending.card_options[1].index == 1);
+	assert(pending.card_options[1].card_id == 456);
+	assert(pending.card_options[1].controller == 1);
+	assert(pending.card_options[1].location == LOCATION_MZONE);
+	assert(pending.card_options[1].sequence == 4);
+	assert(pending.card_options[1].position == POS_FACEUP_DEFENSE);
+}
+
+void test_select_card_rejects_invalid_protocol_fields_without_candidates() {
+	const auto assert_malformed = [](std::vector<std::uint8_t> message) {
+		const std::vector<std::uint8_t> stream = framed(message);
+		const ygo::PendingAction pending =
+				ygo::parse_pending_action(stream.data(), stream.size());
+		assert(pending.kind == ygo::PendingActionKind::Malformed);
+		assert(pending.card_options.empty());
+		assert(!pending.message.empty());
+	};
+
+	std::vector<std::uint8_t> invalid_player{MSG_SELECT_CARD, 2, 0};
+	append_little_endian<std::uint32_t>(invalid_player, 1);
+	append_little_endian<std::uint32_t>(invalid_player, 1);
+	append_little_endian<std::uint32_t>(invalid_player, 1);
+	append_card_option(
+			invalid_player, 123, 1, LOCATION_MZONE, 0, POS_FACEUP_ATTACK);
+	assert_malformed(invalid_player);
+
+	std::vector<std::uint8_t> invalid_cancelable{MSG_SELECT_CARD, 0, 2};
+	append_little_endian<std::uint32_t>(invalid_cancelable, 1);
+	append_little_endian<std::uint32_t>(invalid_cancelable, 1);
+	append_little_endian<std::uint32_t>(invalid_cancelable, 1);
+	append_card_option(
+			invalid_cancelable, 123, 1, LOCATION_MZONE, 0, POS_FACEUP_ATTACK);
+	assert_malformed(invalid_cancelable);
+
+	std::vector<std::uint8_t> invalid_range{MSG_SELECT_CARD, 0, 0};
+	append_little_endian<std::uint32_t>(invalid_range, 2);
+	append_little_endian<std::uint32_t>(invalid_range, 1);
+	append_little_endian<std::uint32_t>(invalid_range, 2);
+	append_card_option(
+			invalid_range, 123, 1, LOCATION_MZONE, 0, POS_FACEUP_ATTACK);
+	append_card_option(
+			invalid_range, 456, 1, LOCATION_MZONE, 1, POS_FACEUP_ATTACK);
+	assert_malformed(invalid_range);
+
+	std::vector<std::uint8_t> max_exceeds_count{MSG_SELECT_CARD, 0, 0};
+	append_little_endian<std::uint32_t>(max_exceeds_count, 1);
+	append_little_endian<std::uint32_t>(max_exceeds_count, 2);
+	append_little_endian<std::uint32_t>(max_exceeds_count, 1);
+	append_card_option(
+			max_exceeds_count, 123, 1, LOCATION_MZONE, 0, POS_FACEUP_ATTACK);
+	assert_malformed(max_exceeds_count);
+
+	std::vector<std::uint8_t> truncated_option{MSG_SELECT_CARD, 0, 0};
+	append_little_endian<std::uint32_t>(truncated_option, 1);
+	append_little_endian<std::uint32_t>(truncated_option, 1);
+	append_little_endian<std::uint32_t>(truncated_option, 2);
+	append_card_option(
+			truncated_option, 123, 1, LOCATION_MZONE, 0, POS_FACEUP_ATTACK);
+	truncated_option.insert(truncated_option.end(), {0, 0, 0, 0, 1, LOCATION_MZONE});
+	assert_malformed(truncated_option);
 }
 
 void test_empty_optional_chain_is_safe_to_auto_pass() {
@@ -328,7 +457,10 @@ int main() {
 	test_battle_message_exposes_attackers_and_phase_options();
 	test_life_point_and_win_notifications_are_preserved();
 	test_truncated_frame_is_reported_as_malformed();
-	test_unimplemented_interactive_message_is_not_silently_ignored();
+	test_yes_no_message_exposes_player_and_description();
+	test_yes_no_rejects_invalid_player_and_truncated_description();
+	test_select_card_exposes_single_card_candidates();
+	test_select_card_rejects_invalid_protocol_fields_without_candidates();
 	test_empty_optional_chain_is_safe_to_auto_pass();
 	test_all_idle_list_widths_are_consumed_before_flags();
 	test_invalid_player_is_rejected_for_supported_messages();
