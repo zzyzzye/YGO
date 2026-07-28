@@ -6,6 +6,10 @@ const SIZES := [
 	Vector2i(3840, 2160),
 	Vector2i(1920, 1200),
 ]
+const STATUS_MESSAGES := [
+	"对手已自动结束回合，玩家1进入下一回合",
+	"决斗响应失败：OCGCore 返回的候选动作已失效，请等待下一份决斗快照后重试",
+]
 const STATUS_HAND_SAFE_GAP := 24.0
 const LAYOUT_STABILITY_FRAMES := 8
 
@@ -23,12 +27,16 @@ func _run() -> void:
 			return
 		var board: DuelBoard = BOARD_SCENE.instantiate()
 		root.add_child(board)
-		await _wait_for_stable_layout(board)
-		if _failed:
-			return
-		_assert_layout(board, viewport_size)
-		if _failed:
-			return
+		# 真实运行时状态由 C++ 快照写入 show_status；每次改写文本后必须重新等待
+		# Label 组合最小尺寸和锚点布局稳定，才能捕获长中文文本撑宽控件的回归。
+		for status_message in STATUS_MESSAGES:
+			board.show_status(status_message)
+			await _wait_for_stable_layout(board)
+			if _failed:
+				return
+			_assert_layout(board, viewport_size, status_message)
+			if _failed:
+				return
 		# 每种尺寸使用独立实例，避免 Container 的排序队列或脚本状态污染下一轮。
 		board.queue_free()
 		await process_frame
@@ -85,7 +93,11 @@ func _collect_key_rects(board: Control) -> Array[Rect2]:
 	return rects
 
 
-func _assert_layout(board: Control, viewport_size: Vector2i) -> void:
+func _assert_layout(
+	board: Control,
+	viewport_size: Vector2i,
+	status_message: String
+) -> void:
 	var viewport_rect := Rect2(Vector2.ZERO, Vector2(viewport_size))
 	var action_bar: Control = board.find_child("ContextActionBar", true, false)
 	var player_hand: Control = board.find_child("PlayerHand", true, false)
@@ -96,13 +108,16 @@ func _assert_layout(board: Control, viewport_size: Vector2i) -> void:
 		_fail("动作条覆盖玩家手牌：" + str(viewport_size))
 		return
 	if status.get_global_rect().intersects(opponent_hand.get_global_rect()):
-		_fail("状态提示覆盖对手手牌：" + str(viewport_size))
+		_fail(
+			"状态提示覆盖对手手牌：%s，文本：%s"
+			% [viewport_size, status_message]
+		)
 		return
 	var status_hand_gap := opponent_hand.get_global_rect().position.x - status.get_global_rect().end.x
 	if status_hand_gap < STATUS_HAND_SAFE_GAP:
 		_fail(
-			"状态提示与对手手牌安全间距不足：%s，仅 %.2f 像素"
-			% [viewport_size, status_hand_gap]
+			"状态提示与对手手牌安全间距不足：%s，仅 %.2f 像素，文本：%s"
+			% [viewport_size, status_hand_gap, status_message]
 		)
 		return
 	if !viewport_rect.encloses(tools.get_global_rect()):
