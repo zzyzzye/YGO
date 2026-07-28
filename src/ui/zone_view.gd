@@ -3,6 +3,10 @@ extends PanelContainer
 
 const CARD_VIEW_SCRIPT = preload("res://src/ui/card_view.gd")
 
+signal card_selected(card_data: Dictionary)
+signal card_hovered(card_data: Dictionary)
+signal card_unhovered(card_data: Dictionary)
+
 var zone_label := ""
 var card_container: CenterContainer
 var title_label: Label
@@ -48,6 +52,9 @@ func show_card(card_data: Dictionary, show_back := false) -> void:
 	# 才能让场区卡保持紧凑并避免两行区域挤压手牌。
 	card.custom_minimum_size = Vector2(72, 105)
 	card.configure(card_data, show_back)
+	card.card_selected.connect(card_selected.emit)
+	card.card_hovered.connect(card_hovered.emit)
+	card.card_unhovered.connect(card_unhovered.emit)
 
 
 func clear_card() -> void:

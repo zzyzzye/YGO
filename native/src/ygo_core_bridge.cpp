@@ -36,6 +36,10 @@ const char *idle_action_kind_name(const IdleActionKind kind) {
 	return "unknown";
 }
 
+const char *battle_action_kind_name(const BattleActionKind kind) {
+	return kind == BattleActionKind::Activate ? "battle_activate" : "attack";
+}
+
 godot::Dictionary card_to_dictionary(
 		const CardDatabase &database,
 		const DuelCardSnapshot &snapshot) {
@@ -94,6 +98,9 @@ godot::Dictionary pending_action_to_dictionary(const PendingAction &pending) {
 	case PendingActionKind::Idle:
 		response["kind"] = godot::String("idle");
 		break;
+	case PendingActionKind::Battle:
+		response["kind"] = godot::String("battle");
+		break;
 	case PendingActionKind::AutoPassChain:
 		response["kind"] = godot::String("auto_pass_chain");
 		break;
@@ -112,6 +119,9 @@ godot::Dictionary pending_action_to_dictionary(const PendingAction &pending) {
 	}
 	response["player"] = pending.player;
 	response["can_end_turn"] = pending.can_end_turn;
+	response["can_enter_battle"] = pending.can_enter_battle;
+	response["can_enter_main2"] = pending.can_enter_main2;
+	response["can_end_battle"] = pending.can_end_battle;
 	response["message_type"] = pending.message_type;
 	response["message"] = godot::String::utf8(pending.message.c_str());
 	godot::Array idle_actions;
@@ -128,6 +138,21 @@ godot::Dictionary pending_action_to_dictionary(const PendingAction &pending) {
 		idle_actions.push_back(item);
 	}
 	response["idle_actions"] = idle_actions;
+	godot::Array battle_actions;
+	for (const auto &action : pending.battle_actions) {
+		godot::Dictionary item;
+		item["action_kind"] = godot::String(battle_action_kind_name(action.kind));
+		item["index"] = static_cast<std::int64_t>(action.index);
+		item["card_id"] = static_cast<std::int64_t>(action.card_id);
+		item["controller"] = action.controller;
+		item["location"] = action.location;
+		item["sequence"] = static_cast<std::int64_t>(action.sequence);
+		item["description"] = static_cast<std::int64_t>(action.description);
+		item["client_mode"] = action.client_mode;
+		item["direct_attackable"] = action.direct_attackable;
+		battle_actions.push_back(item);
+	}
+	response["battle_actions"] = battle_actions;
 	return response;
 }
 
@@ -446,12 +471,65 @@ godot::Dictionary YgoCoreBridge::submit_end_turn() {
 				{},
 		});
 	}
+	if (session_->pending_action().player != 0) {
+		return process_result_to_dictionary({
+				false,
+				OCG_DUEL_STATUS_AWAITING,
+				"当前不是本地玩家的操作回合",
+				session_->pending_action(),
+		});
+	}
 	const ProcessResult result = session_->submit_end_turn();
 	if (!result.ok) {
 		return process_result_to_dictionary(result);
 	}
 	return process_result_to_dictionary(
 			advance_to_player_decision(*session_, result));
+}
+
+godot::Dictionary YgoCoreBridge::submit_enter_battle() {
+	if (!session_ || !session_->is_active()) {
+		return process_result_to_dictionary({false, OCG_DUEL_STATUS_END, "决斗尚未创建", {}});
+	}
+	if (session_->pending_action().player != 0) {
+		return process_result_to_dictionary({
+				false, OCG_DUEL_STATUS_AWAITING, "当前不是本地玩家的操作回合",
+				session_->pending_action()});
+	}
+	const ProcessResult result = session_->submit_enter_battle();
+	return result.ok
+			? process_result_to_dictionary(advance_to_player_decision(*session_, result))
+			: process_result_to_dictionary(result);
+}
+
+godot::Dictionary YgoCoreBridge::submit_enter_main2() {
+	if (!session_ || !session_->is_active()) {
+		return process_result_to_dictionary({false, OCG_DUEL_STATUS_END, "决斗尚未创建", {}});
+	}
+	if (session_->pending_action().player != 0) {
+		return process_result_to_dictionary({
+				false, OCG_DUEL_STATUS_AWAITING, "当前不是本地玩家的操作回合",
+				session_->pending_action()});
+	}
+	const ProcessResult result = session_->submit_enter_main2();
+	return result.ok
+			? process_result_to_dictionary(advance_to_player_decision(*session_, result))
+			: process_result_to_dictionary(result);
+}
+
+godot::Dictionary YgoCoreBridge::submit_end_battle() {
+	if (!session_ || !session_->is_active()) {
+		return process_result_to_dictionary({false, OCG_DUEL_STATUS_END, "决斗尚未创建", {}});
+	}
+	if (session_->pending_action().player != 0) {
+		return process_result_to_dictionary({
+				false, OCG_DUEL_STATUS_AWAITING, "当前不是本地玩家的操作回合",
+				session_->pending_action()});
+	}
+	const ProcessResult result = session_->submit_end_battle();
+	return result.ok
+			? process_result_to_dictionary(advance_to_player_decision(*session_, result))
+			: process_result_to_dictionary(result);
 }
 
 godot::Dictionary YgoCoreBridge::submit_idle_action(
@@ -512,6 +590,41 @@ godot::Dictionary YgoCoreBridge::submit_idle_action(
 	}
 	return process_result_to_dictionary(
 			advance_to_player_decision(*session_, result));
+}
+
+godot::Dictionary YgoCoreBridge::submit_battle_action(
+		const godot::String &action_kind,
+		const std::int64_t index) {
+	if (!session_ || !session_->is_active()) {
+		return process_result_to_dictionary({false, OCG_DUEL_STATUS_END, "决斗尚未创建", {}});
+	}
+	if (index < 0 || session_->pending_action().player != 0) {
+		return process_result_to_dictionary({
+				false,
+				OCG_DUEL_STATUS_AWAITING,
+				index < 0 ? "战斗动作索引不能为负数" : "当前不是本地玩家的操作回合",
+				session_->pending_action(),
+		});
+	}
+	const std::string kind_name = action_kind.utf8().get_data();
+	BattleActionKind kind;
+	if (kind_name == "battle_activate") {
+		kind = BattleActionKind::Activate;
+	} else if (kind_name == "attack") {
+		kind = BattleActionKind::Attack;
+	} else {
+		return process_result_to_dictionary({
+				false,
+				OCG_DUEL_STATUS_AWAITING,
+				"未知的战斗阶段动作类型",
+				session_->pending_action(),
+		});
+	}
+	const ProcessResult result =
+			session_->submit_battle_action(kind, static_cast<std::size_t>(index));
+	return result.ok
+			? process_result_to_dictionary(advance_to_player_decision(*session_, result))
+			: process_result_to_dictionary(result);
 }
 
 godot::Dictionary YgoCoreBridge::get_duel_state() const {
@@ -607,8 +720,20 @@ void YgoCoreBridge::_bind_methods() {
 			godot::D_METHOD("submit_end_turn"),
 			&YgoCoreBridge::submit_end_turn);
 	godot::ClassDB::bind_method(
+			godot::D_METHOD("submit_enter_battle"),
+			&YgoCoreBridge::submit_enter_battle);
+	godot::ClassDB::bind_method(
+			godot::D_METHOD("submit_enter_main2"),
+			&YgoCoreBridge::submit_enter_main2);
+	godot::ClassDB::bind_method(
+			godot::D_METHOD("submit_end_battle"),
+			&YgoCoreBridge::submit_end_battle);
+	godot::ClassDB::bind_method(
 			godot::D_METHOD("submit_idle_action", "action_kind", "index"),
 			&YgoCoreBridge::submit_idle_action);
+	godot::ClassDB::bind_method(
+			godot::D_METHOD("submit_battle_action", "action_kind", "index"),
+			&YgoCoreBridge::submit_battle_action);
 	godot::ClassDB::bind_method(
 			godot::D_METHOD("get_duel_state"),
 			&YgoCoreBridge::get_duel_state);

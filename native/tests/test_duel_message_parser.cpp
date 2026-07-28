@@ -44,8 +44,46 @@ void test_notification_before_idle_action_does_not_hide_pending_player() {
 			ygo::parse_pending_action(stream.data(), stream.size());
 	assert(pending.kind == ygo::PendingActionKind::Idle);
 	assert(pending.player == 0);
+	assert(pending.can_enter_battle);
 	assert(pending.can_end_turn);
 	assert(pending.message_type == MSG_SELECT_IDLECMD);
+}
+
+void test_battle_message_exposes_attackers_and_phase_options() {
+	std::vector<std::uint8_t> stream;
+	std::vector<std::uint8_t> battle{MSG_SELECT_BATTLECMD, 0};
+
+	append_little_endian<std::uint32_t>(battle, 1);
+	append_little_endian<std::uint32_t>(battle, 46986414);
+	battle.push_back(0);
+	battle.push_back(LOCATION_SZONE);
+	append_little_endian<std::uint32_t>(battle, 3);
+	append_little_endian<std::uint64_t>(battle, 0x1122334455667788ULL);
+	battle.push_back(2);
+	append_little_endian<std::uint32_t>(battle, 1);
+	append_little_endian<std::uint32_t>(battle, 89631139);
+	battle.push_back(0);
+	battle.push_back(LOCATION_MZONE);
+	battle.push_back(2);
+	battle.push_back(1); // 可以直接攻击。
+	battle.push_back(1); // 可以进入主要阶段二。
+	battle.push_back(1); // 可以结束战斗阶段。
+	append_frame(stream, battle);
+
+	const ygo::PendingAction pending =
+			ygo::parse_pending_action(stream.data(), stream.size());
+	assert(pending.kind == ygo::PendingActionKind::Battle);
+	assert(pending.player == 0);
+	assert(pending.can_enter_main2);
+	assert(pending.can_end_battle);
+	assert(pending.battle_actions.size() == 2);
+	assert(pending.battle_actions[0].kind == ygo::BattleActionKind::Activate);
+	assert(pending.battle_actions[0].card_id == 46986414);
+	assert(pending.battle_actions[0].description == 0x1122334455667788ULL);
+	assert(pending.battle_actions[1].kind == ygo::BattleActionKind::Attack);
+	assert(pending.battle_actions[1].card_id == 89631139);
+	assert(pending.battle_actions[1].sequence == 2);
+	assert(pending.battle_actions[1].direct_attackable);
 }
 
 void test_truncated_frame_is_reported_as_malformed() {
@@ -259,6 +297,7 @@ void test_select_place_exposes_first_available_own_monster_zone() {
 
 int main() {
 	test_notification_before_idle_action_does_not_hide_pending_player();
+	test_battle_message_exposes_attackers_and_phase_options();
 	test_truncated_frame_is_reported_as_malformed();
 	test_unimplemented_interactive_message_is_not_silently_ignored();
 	test_empty_optional_chain_is_safe_to_auto_pass();

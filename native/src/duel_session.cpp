@@ -308,6 +308,22 @@ ProcessResult DuelSession::submit_end_turn() {
 	return process_once();
 }
 
+ProcessResult DuelSession::submit_enter_battle() {
+	if (!is_active()) {
+		return {false, OCG_DUEL_STATUS_END, "决斗尚未创建", {}};
+	}
+	if (pending_action_.kind != PendingActionKind::Idle
+			|| !pending_action_.can_enter_battle) {
+		return {false, OCG_DUEL_STATUS_AWAITING, "当前不能进入战斗阶段", pending_action_};
+	}
+	const std::uint8_t response[4]{6, 0, 0, 0};
+	last_submitted_action_ = pending_action_;
+	allow_auto_select_place_ = false;
+	OCG_DuelSetResponse(static_cast<OCG_Duel>(duel_), response, sizeof(response));
+	pending_action_ = {};
+	return process_once();
+}
+
 ProcessResult DuelSession::submit_idle_action(
 		const IdleActionKind kind,
 		const std::size_t index) {
@@ -365,6 +381,71 @@ ProcessResult DuelSession::submit_idle_action(
 			|| kind == IdleActionKind::SpecialSummon
 			|| kind == IdleActionKind::MonsterSet
 			|| kind == IdleActionKind::SpellTrapSet;
+	OCG_DuelSetResponse(static_cast<OCG_Duel>(duel_), response, sizeof(response));
+	pending_action_ = {};
+	return process_once();
+}
+
+ProcessResult DuelSession::submit_battle_action(
+		const BattleActionKind kind,
+		const std::size_t index) {
+	if (!is_active()) {
+		return {false, OCG_DUEL_STATUS_END, "决斗尚未创建", {}};
+	}
+	if (pending_action_.kind != PendingActionKind::Battle) {
+		return {false, OCG_DUEL_STATUS_AWAITING, "当前不是战斗阶段动作选择", pending_action_};
+	}
+	const auto candidate = std::find_if(
+			pending_action_.battle_actions.begin(),
+			pending_action_.battle_actions.end(),
+			[kind, index](const BattleAction &action) {
+				return action.kind == kind && action.index == index;
+			});
+	if (candidate == pending_action_.battle_actions.end() || index > 0xffffU) {
+		return {false, OCG_DUEL_STATUS_AWAITING, "战斗动作不属于当前 OCGCore 候选列表", pending_action_};
+	}
+	const std::uint32_t action_type =
+			kind == BattleActionKind::Activate ? 0U : 1U;
+	const std::uint32_t packed =
+			(static_cast<std::uint32_t>(index) << 16U) | action_type;
+	const std::uint8_t response[4]{
+			static_cast<std::uint8_t>(packed & 0xffU),
+			static_cast<std::uint8_t>((packed >> 8U) & 0xffU),
+			static_cast<std::uint8_t>((packed >> 16U) & 0xffU),
+			static_cast<std::uint8_t>((packed >> 24U) & 0xffU),
+	};
+	last_submitted_action_ = pending_action_;
+	allow_auto_select_place_ = false;
+	OCG_DuelSetResponse(static_cast<OCG_Duel>(duel_), response, sizeof(response));
+	pending_action_ = {};
+	return process_once();
+}
+
+ProcessResult DuelSession::submit_enter_main2() {
+	if (!is_active()) {
+		return {false, OCG_DUEL_STATUS_END, "决斗尚未创建", {}};
+	}
+	if (pending_action_.kind != PendingActionKind::Battle
+			|| !pending_action_.can_enter_main2) {
+		return {false, OCG_DUEL_STATUS_AWAITING, "当前不能进入主要阶段二", pending_action_};
+	}
+	const std::uint8_t response[4]{2, 0, 0, 0};
+	last_submitted_action_ = pending_action_;
+	OCG_DuelSetResponse(static_cast<OCG_Duel>(duel_), response, sizeof(response));
+	pending_action_ = {};
+	return process_once();
+}
+
+ProcessResult DuelSession::submit_end_battle() {
+	if (!is_active()) {
+		return {false, OCG_DUEL_STATUS_END, "决斗尚未创建", {}};
+	}
+	if (pending_action_.kind != PendingActionKind::Battle
+			|| !pending_action_.can_end_battle) {
+		return {false, OCG_DUEL_STATUS_AWAITING, "当前不能结束战斗阶段", pending_action_};
+	}
+	const std::uint8_t response[4]{3, 0, 0, 0};
+	last_submitted_action_ = pending_action_;
 	OCG_DuelSetResponse(static_cast<OCG_Duel>(duel_), response, sizeof(response));
 	pending_action_ = {};
 	return process_once();

@@ -10,11 +10,17 @@ namespace ygo {
 enum class PendingActionKind {
 	None,
 	Idle,
+	Battle,
 	AutoPassChain,
 	AutoSelectPlace,
 	Retry,
 	Unsupported,
 	Malformed,
+};
+
+enum class BattleActionKind {
+	Activate,
+	Attack,
 };
 
 enum class IdleActionKind {
@@ -45,6 +51,21 @@ struct PlaceOption {
 	std::uint8_t sequence = 0;
 };
 
+// 对应 MSG_SELECT_BATTLECMD 中的可发动效果或可攻击怪兽。攻击动作的
+// direct_attackable 只说明该攻击者具备直接攻击能力，具体目标仍由后续
+// OCGCore 消息决定，不能由界面提前推断。
+struct BattleAction {
+	BattleActionKind kind = BattleActionKind::Attack;
+	std::size_t index = 0;
+	std::uint32_t card_id = 0;
+	std::uint8_t controller = 0;
+	std::uint8_t location = 0;
+	std::uint32_t sequence = 0;
+	std::uint64_t description = 0;
+	std::uint8_t client_mode = 0;
+	bool direct_attackable = false;
+};
+
 // 描述 OCGCore 当前等待的玩家决策。该值类型不暴露原始缓冲区，调用方只能
 // 根据已经验证的语义字段决定是否显示或提交动作。
 struct PendingAction {
@@ -55,6 +76,10 @@ struct PendingAction {
 	std::string message = "当前没有待处理的玩家决策";
 	std::vector<IdleAction> idle_actions;
 	std::vector<PlaceOption> place_options;
+	std::vector<BattleAction> battle_actions;
+	bool can_enter_battle = false;
+	bool can_enter_main2 = false;
+	bool can_end_battle = false;
 };
 
 // 解析 OCGCore_DuelGetMessage 返回的完整缓冲区。缓冲区由若干

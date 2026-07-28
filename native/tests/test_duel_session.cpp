@@ -71,12 +71,87 @@ void test_inactive_session_rejects_end_turn() {
 	const ygo::ProcessResult result = session.submit_end_turn();
 	assert(!result.ok);
 	assert(result.message == "决斗尚未创建");
+	assert(!session.submit_enter_battle().ok);
+	assert(!session.submit_enter_main2().ok);
+	assert(!session.submit_end_battle().ok);
+	assert(!session.submit_battle_action(ygo::BattleActionKind::Attack, 0).ok);
 }
 
 std::filesystem::path repository_root() {
 	// __FILE__ 由 CMake 以仓库内源码路径编译；向上三级可稳定回到项目根目录，
 	// 使 CTest 不依赖调用者的当前工作目录。
 	return std::filesystem::path(__FILE__).parent_path().parent_path().parent_path();
+}
+
+void test_real_direct_attack_is_accepted() {
+	const std::filesystem::path root = repository_root();
+	const auto loaded = ygo::CardDatabase::load_json_intersection(
+			root / "data/cards.json",
+			root / "images");
+	assert(loaded.ok);
+	const std::filesystem::path scripts_root = root / "third_party/CardScripts";
+	auto scripts = std::make_shared<ygo::OfficialScriptLoader>(scripts_root);
+	std::vector<std::uint32_t> deck;
+	constexpr std::uint32_t excluded_types =
+			TYPE_FUSION | TYPE_SYNCHRO | TYPE_XYZ | TYPE_LINK | TYPE_TOKEN;
+	for (const auto &[id, record] : loaded.database->records()) {
+		if ((record.rule.type & excluded_types) == 0
+				&& (record.rule.type & TYPE_NORMAL) != 0
+				&& std::filesystem::is_regular_file(
+						scripts_root / "official" / ("c" + std::to_string(id) + ".lua"))) {
+			deck.push_back(id);
+		}
+	}
+	for (std::size_t index = 0; deck.size() < 40 && index < deck.size(); ++index) {
+		deck.push_back(deck[index]);
+	}
+	assert(deck.size() == 40);
+
+	ygo::DuelSession session(loaded.database, scripts);
+	assert(session.create(0x424154544c45ULL).ok);
+	assert(session.add_deck_cards(0, deck, LOCATION_DECK).added == 40);
+	assert(session.add_deck_cards(1, deck, LOCATION_DECK).added == 40);
+	auto advance = [&session](ygo::ProcessResult result) {
+		for (int index = 0;
+				index < 100
+				&& result.pending_action.kind == ygo::PendingActionKind::None
+				&& result.status != OCG_DUEL_STATUS_END;
+				++index) {
+			result = session.step();
+		}
+		return result;
+	};
+
+	ygo::ProcessResult process = advance(session.start());
+	assert(process.pending_action.kind == ygo::PendingActionKind::Idle);
+	process = advance(session.submit_end_turn());
+	assert(process.pending_action.kind == ygo::PendingActionKind::Idle);
+	assert(process.pending_action.player == 1);
+	const auto summon = std::find_if(
+			process.pending_action.idle_actions.begin(),
+			process.pending_action.idle_actions.end(),
+			[](const ygo::IdleAction &action) {
+				return action.kind == ygo::IdleActionKind::NormalSummon;
+			});
+	assert(summon != process.pending_action.idle_actions.end());
+	process = advance(session.submit_idle_action(summon->kind, summon->index));
+	assert(process.pending_action.kind == ygo::PendingActionKind::Idle);
+	process = advance(session.submit_enter_battle());
+	assert(process.pending_action.kind == ygo::PendingActionKind::Battle);
+	const auto attack = std::find_if(
+			process.pending_action.battle_actions.begin(),
+			process.pending_action.battle_actions.end(),
+			[](const ygo::BattleAction &action) {
+				return action.kind == ygo::BattleActionKind::Attack;
+			});
+	assert(attack != process.pending_action.battle_actions.end());
+	assert(attack->direct_attackable);
+
+	process = advance(session.submit_battle_action(attack->kind, attack->index));
+	assert(process.ok);
+	assert(process.pending_action.kind != ygo::PendingActionKind::Retry);
+	assert(process.pending_action.kind != ygo::PendingActionKind::Malformed);
+	assert(process.pending_action.kind != ygo::PendingActionKind::Unsupported);
 }
 
 void test_fixed_real_decks_advance_to_second_players_idle_action() {
@@ -179,6 +254,8 @@ void test_fixed_real_decks_advance_to_second_players_idle_action() {
 	assert(process.pending_action.kind == ygo::PendingActionKind::Idle);
 	assert(selected_card_id != 0);
 
+	// 先攻第一回合按规则不能进入战斗阶段，必须从空闲命令直接结束回合。
+	assert(!process.pending_action.can_enter_battle);
 	process = session.submit_end_turn();
 	for (int step_index = 0;
 			step_index < 100
@@ -193,6 +270,32 @@ void test_fixed_real_decks_advance_to_second_players_idle_action() {
 	assert(process.pending_action.kind == ygo::PendingActionKind::Idle);
 	assert(process.pending_action.player == 1);
 	assert(process.pending_action.can_end_turn);
+	assert(process.pending_action.can_enter_battle);
+
+	process = session.submit_enter_battle();
+	for (int step_index = 0;
+			step_index < 100
+			&& process.pending_action.kind == ygo::PendingActionKind::None;
+			++step_index) {
+		process = session.step();
+	}
+	assert(process.pending_action.kind == ygo::PendingActionKind::Battle);
+	assert(process.pending_action.player == 1);
+	assert(process.pending_action.can_enter_main2);
+	assert(process.pending_action.can_end_battle);
+	const ygo::ProcessResult invalid_battle =
+			session.submit_battle_action(ygo::BattleActionKind::Attack, 999);
+	assert(!invalid_battle.ok);
+	assert(invalid_battle.pending_action.kind == ygo::PendingActionKind::Battle);
+	process = session.submit_enter_main2();
+	for (int step_index = 0;
+			step_index < 100
+			&& process.pending_action.kind == ygo::PendingActionKind::None;
+			++step_index) {
+		process = session.step();
+	}
+	assert(process.pending_action.kind == ygo::PendingActionKind::Idle);
+	assert(process.pending_action.player == 1);
 
 	const std::array<int, 6> first_trace{
 			MSG_SELECT_IDLECMD,
@@ -269,6 +372,7 @@ int main() {
 	assert(minor >= 0);
 	test_real_callbacks_create_and_destroy_duel();
 	test_inactive_session_rejects_end_turn();
+	test_real_direct_attack_is_accepted();
 	test_fixed_real_decks_advance_to_second_players_idle_action();
 	test_full_local_assets_when_requested();
 }

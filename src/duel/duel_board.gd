@@ -5,7 +5,11 @@ const HAND_VIEW_SCRIPT = preload("res://src/ui/hand_view.gd")
 const ZONE_VIEW_SCRIPT = preload("res://src/ui/zone_view.gd")
 
 signal idle_action_requested(action_kind: String, index: int, card_data: Dictionary)
+signal battle_action_requested(action_kind: String, index: int, card_data: Dictionary)
 signal end_turn_requested
+signal enter_battle_requested
+signal enter_main2_requested
+signal end_battle_requested
 signal restart_requested
 signal exit_requested
 
@@ -29,12 +33,17 @@ var player_stats_label: Label
 var opponent_stats_label: Label
 var confirmation_overlay: PanelContainer
 var confirmation_label: Label
+var confirmation_buttons: HBoxContainer
 var selected_card: Dictionary = {}
 var _hovered_card: Dictionary = {}
 var current_actions: Array = []
 var _confirmation_kind := ""
 var _local_player_turn := false
 var _can_end_turn := false
+var _phase_kind := "idle"
+var _can_enter_battle := false
+var _can_enter_main2 := false
+var _can_end_battle := false
 
 
 func _ready() -> void:
@@ -111,6 +120,10 @@ func _add_zone_row(parent: VBoxContainer, prefix: String, opponent := false) -> 
 		row.add_child(zone)
 		var display_index := 5 - index if opponent else index + 1
 		zone.configure("%s %s" % [prefix, display_index])
+		if !opponent:
+			zone.card_selected.connect(_on_card_selected)
+			zone.card_hovered.connect(_preview_card)
+			zone.card_unhovered.connect(_on_card_unhovered)
 		zones.append(zone)
 	return zones
 
@@ -275,18 +288,10 @@ func _build_confirmation_overlay() -> void:
 	confirmation_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	confirmation_label.add_theme_font_size_override("font_size", 20)
 	content.add_child(confirmation_label)
-	var buttons := HBoxContainer.new()
-	buttons.alignment = BoxContainer.ALIGNMENT_CENTER
-	buttons.add_theme_constant_override("separation", 10)
-	content.add_child(buttons)
-	var confirm := Button.new()
-	confirm.text = "确认"
-	confirm.pressed.connect(_confirm_pending_action)
-	buttons.add_child(confirm)
-	var cancel := Button.new()
-	cancel.text = "取消"
-	cancel.pressed.connect(_close_confirmation)
-	buttons.add_child(cancel)
+	confirmation_buttons = HBoxContainer.new()
+	confirmation_buttons.alignment = BoxContainer.ALIGNMENT_CENTER
+	confirmation_buttons.add_theme_constant_override("separation", 10)
+	content.add_child(confirmation_buttons)
 
 
 func _build_debug_overlay() -> void:
@@ -310,6 +315,13 @@ func render_snapshot(snapshot: Dictionary) -> void:
 	current_actions = snapshot.get("idle_actions", [])
 	_local_player_turn = bool(snapshot.get("local_player_turn", false))
 	_can_end_turn = bool(snapshot.get("can_end_turn", false))
+	_phase_kind = str(snapshot.get("phase_kind", "idle"))
+	_can_enter_battle = bool(snapshot.get("can_enter_battle", false))
+	_can_enter_main2 = bool(snapshot.get("can_enter_main2", false))
+	_can_end_battle = bool(snapshot.get("can_end_battle", false))
+	# 阶段选项绑定的是上一份 OCGCore 决策快照。任何新快照到达后都必须
+	# 立即失效，避免玩家在卡牌动作完成后继续点击旧阶段按钮。
+	_close_confirmation()
 	_clear_selection()
 	player_hand.render_cards(snapshot.get("player_hand", []), false)
 	var opponent_cards: Array = []
@@ -318,7 +330,10 @@ func render_snapshot(snapshot: Dictionary) -> void:
 	opponent_hand.render_cards(opponent_cards, true)
 	turn_label.text = str(snapshot.get("turn_text", "等待玩家操作"))
 	phase_button.text = str(snapshot.get("turn_text", "等待阶段数据")).replace(" · ", "\n")
-	phase_button.disabled = !_local_player_turn or !_can_end_turn
+	phase_button.disabled = !_local_player_turn or !(
+		(_phase_kind == "idle" and (_can_enter_battle or _can_end_turn))
+		or (_phase_kind == "battle" and (_can_enter_main2 or _can_end_battle))
+	)
 	player_stats_label.text = str(snapshot.get("player_stats", ""))
 	opponent_stats_label.text = str(snapshot.get("opponent_stats", ""))
 	show_status(str(snapshot.get("status_text", "")))
@@ -406,7 +421,7 @@ func _rebuild_action_buttons() -> void:
 		var button := Button.new()
 		button.text = label
 		button.pressed.connect(
-			idle_action_requested.emit.bind(kind, int(action.get("index", 0)), selected_card)
+			_emit_card_action.bind(kind, int(action.get("index", 0)), selected_card)
 		)
 		action_box.add_child(button)
 		matched += 1
@@ -428,8 +443,18 @@ func _action_label(kind: String) -> String:
 			return "魔陷盖放"
 		"activate":
 			return "发动效果"
+		"battle_activate":
+			return "发动效果"
+		"attack":
+			return "攻击"
 		_:
 			return ""
+
+func _emit_card_action(kind: String, index: int, card_data: Dictionary) -> void:
+	if kind == "attack" or kind == "battle_activate":
+		battle_action_requested.emit(kind, index, card_data)
+	else:
+		idle_action_requested.emit(kind, index, card_data)
 
 
 func _clear_selection() -> void:
@@ -467,8 +492,21 @@ func _same_card(left: Dictionary, right: Dictionary) -> bool:
 
 
 func _on_phase_pressed() -> void:
-	if _local_player_turn and _can_end_turn:
-		_open_confirmation("end_turn", "确定结束当前回合？")
+	if !_local_player_turn:
+		return
+	var options: Array = []
+	if _phase_kind == "idle":
+		if _can_enter_battle:
+			options.append({"kind": "enter_battle", "text": "进入战斗阶段"})
+		if _can_end_turn:
+			options.append({"kind": "end_turn", "text": "结束回合"})
+	elif _phase_kind == "battle":
+		if _can_enter_main2:
+			options.append({"kind": "enter_main2", "text": "进入主要阶段二"})
+		if _can_end_battle:
+			options.append({"kind": "end_battle", "text": "结束战斗阶段"})
+	if !options.is_empty():
+		_open_phase_options(options)
 
 
 func _request_restart() -> void:
@@ -482,7 +520,50 @@ func _request_exit() -> void:
 func _open_confirmation(kind: String, message: String) -> void:
 	_confirmation_kind = kind
 	confirmation_label.text = message
+	_clear_confirmation_buttons()
+	var confirm := Button.new()
+	confirm.text = "确认"
+	confirm.pressed.connect(_confirm_pending_action)
+	confirmation_buttons.add_child(confirm)
+	_add_confirmation_cancel()
 	confirmation_overlay.visible = true
+
+func _open_phase_options(options: Array) -> void:
+	_confirmation_kind = ""
+	confirmation_label.text = "选择要前往的阶段"
+	_clear_confirmation_buttons()
+	for option in options:
+		var button := Button.new()
+		button.text = str(option.text)
+		button.pressed.connect(_emit_phase_action.bind(str(option.kind)))
+		confirmation_buttons.add_child(button)
+	_add_confirmation_cancel()
+	confirmation_overlay.visible = true
+
+
+func _clear_confirmation_buttons() -> void:
+	for child in confirmation_buttons.get_children():
+		child.queue_free()
+
+
+func _add_confirmation_cancel() -> void:
+	var cancel := Button.new()
+	cancel.text = "取消"
+	cancel.pressed.connect(_close_confirmation)
+	confirmation_buttons.add_child(cancel)
+
+
+func _emit_phase_action(kind: String) -> void:
+	_close_confirmation()
+	match kind:
+		"enter_battle":
+			enter_battle_requested.emit()
+		"enter_main2":
+			enter_main2_requested.emit()
+		"end_battle":
+			end_battle_requested.emit()
+		"end_turn":
+			end_turn_requested.emit()
 
 
 func _close_confirmation() -> void:

@@ -7,6 +7,7 @@ const MAIN_SCRIPT = preload("res://src/main/main.gd")
 var _selected_events: Array = []
 var _hovered_events: Array = []
 var _unhovered_events: Array = []
+var _battle_events: Array = []
 
 class FakeBridge:
 	extends RefCounted
@@ -96,6 +97,14 @@ func _run() -> void:
 	var board = DUEL_BOARD_SCRIPT.new()
 	root.add_child(board)
 	await process_frame
+	board.battle_action_requested.connect(
+		func(kind: String, index: int, selected: Dictionary) -> void:
+			_battle_events.append({
+				"kind": kind,
+				"index": index,
+				"card_id": selected.get("card_id", 0),
+			})
+	)
 	if board.find_child("LegacyActionPanel", true, false) != null:
 		_fail("情境式布局不能保留右侧永久操作列")
 		return
@@ -193,13 +202,85 @@ func _run() -> void:
 		_fail("对手回合必须禁用阶段按钮")
 		return
 
+	var field_card := card.duplicate()
+	field_card.location = 4
+	field_card.sequence = 0
+	board.render_snapshot({
+		"player_monsters": [field_card],
+		"idle_actions": [{
+			"card_id": field_card.card_id,
+			"sequence": 0,
+			"location": 4,
+			"controller": 0,
+			"action_kind": "attack",
+			"index": 7,
+		}],
+		"local_player_turn": true,
+		"phase_kind": "battle",
+		"can_enter_main2": true,
+		"can_end_battle": true,
+	})
+	board.player_monster_zones[0].card_selected.emit(field_card)
+	if !action_bar.visible or str(action_bar.get_child(0).text) != "攻击":
+		_fail("战斗阶段必须在场上怪兽旁显示真实攻击动作")
+		return
+	action_bar.get_child(0).pressed.emit()
+	if (
+		_battle_events.size() != 1
+		or str(_battle_events[0].kind) != "attack"
+		or int(_battle_events[0].index) != 7
+	):
+		_fail("攻击按钮必须原样转发动作类型和 OCGCore 类别内索引")
+		return
+	board._on_phase_pressed()
+	if !board.confirmation_overlay.visible:
+		_fail("阶段按钮必须显示真实可用阶段选项")
+		return
+	var phase_option_texts: Array = []
+	for child in board.confirmation_buttons.get_children():
+		phase_option_texts.append(str(child.text))
+	if !phase_option_texts.has("进入主要阶段二") or !phase_option_texts.has("结束战斗阶段"):
+		_fail("战斗阶段选项必须来自 OCGCore 能力")
+		return
+
 	var main = MAIN_SCRIPT.new()
 	main.bridge = FakeBridge.new()
 	main.board = board
 	main._refresh_board("测试本地回合能力")
+	if board.confirmation_overlay.visible:
+		_fail("新快照必须关闭旧阶段选项")
+		return
 	if board.find_child("PhaseButton", true, false).disabled:
 		_fail("Main 必须把本地回合和可结束回合能力写入快照")
 		return
+
+	var real_bridge = YgoCoreBridge.new()
+	var initialized: Dictionary = real_bridge.initialize_card_database(
+		ProjectSettings.globalize_path("res://")
+	)
+	if !initialized.ok:
+		_fail("本地玩家门禁测试无法初始化真实卡库：" + str(initialized.message))
+		return
+	var scripted_ids: PackedInt64Array = real_bridge.get_scripted_card_ids()
+	var setup: Dictionary = real_bridge.setup_duel(scripted_ids, scripted_ids, 0x4c4f43414c)
+	if !setup.ok:
+		_fail("本地玩家门禁测试无法建立真实决斗：" + str(setup.message))
+		return
+	var first_end: Dictionary = real_bridge.submit_end_turn()
+	if !first_end.ok or int(real_bridge.get_pending_action().player) != 1:
+		_fail("真实决斗未能推进到玩家2决策")
+		return
+	for method_name in [
+		"submit_end_turn",
+		"submit_enter_battle",
+		"submit_enter_main2",
+		"submit_end_battle",
+	]:
+		var rejected: Dictionary = real_bridge.call(method_name)
+		if rejected.ok or str(rejected.message) != "当前不是本地玩家的操作回合":
+			_fail("阶段接口未拒绝代替玩家2操作：" + method_name)
+			return
+	real_bridge.destroy_duel()
 
 	main.free()
 	hand.queue_free()

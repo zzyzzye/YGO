@@ -157,6 +157,96 @@ ygo::PendingAction parse_idle_message(
 							  : "当前空闲阶段不能结束回合",
 	};
 	pending.idle_actions = std::move(actions);
+	pending.can_enter_battle = can_enter_battle != 0;
+	return pending;
+}
+
+ygo::PendingAction malformed_battle_message() {
+	return {
+			ygo::PendingActionKind::Malformed,
+			-1,
+			false,
+			MSG_SELECT_BATTLECMD,
+			"战斗阶段消息长度不足，无法安全解析",
+	};
+}
+
+ygo::PendingAction parse_battle_message(
+		const std::uint8_t *data,
+		const std::size_t size) {
+	ByteReader reader(data, size);
+	std::uint8_t message_type = 0;
+	std::uint8_t player = 0;
+	if (!reader.read_u8(message_type) || !reader.read_u8(player)) {
+		return malformed_battle_message();
+	}
+	if (player > 1) {
+		return {
+				ygo::PendingActionKind::Malformed,
+				-1,
+				false,
+				MSG_SELECT_BATTLECMD,
+				"战斗阶段消息包含非法玩家编号",
+		};
+	}
+
+	std::vector<ygo::BattleAction> actions;
+	std::uint32_t activate_count = 0;
+	if (!reader.read_u32(activate_count)) {
+		return malformed_battle_message();
+	}
+	for (std::uint32_t index = 0; index < activate_count; ++index) {
+		ygo::BattleAction action;
+		action.kind = ygo::BattleActionKind::Activate;
+		action.index = index;
+		if (!reader.read_u32(action.card_id)
+				|| !reader.read_u8(action.controller)
+				|| !reader.read_u8(action.location)
+				|| !reader.read_u32(action.sequence)
+				|| !reader.read_u64(action.description)
+				|| !reader.read_u8(action.client_mode)) {
+			return malformed_battle_message();
+		}
+		actions.push_back(action);
+	}
+
+	std::uint32_t attack_count = 0;
+	if (!reader.read_u32(attack_count)) {
+		return malformed_battle_message();
+	}
+	for (std::uint32_t index = 0; index < attack_count; ++index) {
+		ygo::BattleAction action;
+		action.kind = ygo::BattleActionKind::Attack;
+		action.index = index;
+		std::uint8_t sequence = 0;
+		std::uint8_t direct_attackable = 0;
+		if (!reader.read_u32(action.card_id)
+				|| !reader.read_u8(action.controller)
+				|| !reader.read_u8(action.location)
+				|| !reader.read_u8(sequence)
+				|| !reader.read_u8(direct_attackable)) {
+			return malformed_battle_message();
+		}
+		action.sequence = sequence;
+		action.direct_attackable = direct_attackable != 0;
+		actions.push_back(action);
+	}
+
+	std::uint8_t can_enter_main2 = 0;
+	std::uint8_t can_end_battle = 0;
+	if (!reader.read_u8(can_enter_main2) || !reader.read_u8(can_end_battle)) {
+		return malformed_battle_message();
+	}
+	ygo::PendingAction pending{
+			ygo::PendingActionKind::Battle,
+			static_cast<int>(player),
+			false,
+			MSG_SELECT_BATTLECMD,
+			"等待玩家选择战斗阶段动作",
+	};
+	pending.battle_actions = std::move(actions);
+	pending.can_enter_main2 = can_enter_main2 != 0;
+	pending.can_end_battle = can_end_battle != 0;
 	return pending;
 }
 
@@ -341,6 +431,8 @@ PendingAction parse_pending_action(
 		const std::uint8_t *frame = stream.current();
 		if (frame[0] == MSG_SELECT_IDLECMD) {
 			pending = parse_idle_message(frame, frame_size);
+		} else if (frame[0] == MSG_SELECT_BATTLECMD) {
+			pending = parse_battle_message(frame, frame_size);
 		} else if (frame[0] == MSG_SELECT_CHAIN) {
 			pending = parse_chain_message(frame, frame_size);
 		} else if (frame[0] == MSG_SELECT_PLACE) {

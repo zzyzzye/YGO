@@ -69,11 +69,20 @@ public:
 	// 仅在解析器确认当前为空闲阶段且允许进入结束阶段时提交语义动作。
 	// 校验失败不会向 OCGCore 写入任何响应。
 	[[nodiscard]] ProcessResult submit_end_turn();
+	// MSG_SELECT_IDLECMD 的 type=6 表示从主要阶段一进入战斗阶段。
+	[[nodiscard]] ProcessResult submit_enter_battle();
 	// 提交当前 MSG_SELECT_IDLECMD 快照中真实存在的候选。kind 和 index 必须
 	// 同时匹配，防止界面使用过期索引或跨类别索引驱动 OCGCore。
 	[[nodiscard]] ProcessResult submit_idle_action(
 			IdleActionKind kind,
 			std::size_t index);
+	// 提交战斗阶段当前快照中的“发动”或“攻击”候选。
+	[[nodiscard]] ProcessResult submit_battle_action(
+			BattleActionKind kind,
+			std::size_t index);
+	// 分别对应 MSG_SELECT_BATTLECMD 的 type=2（主要阶段二）和 type=3（结束）。
+	[[nodiscard]] ProcessResult submit_enter_main2();
+	[[nodiscard]] ProcessResult submit_end_battle();
 	[[nodiscard]] const PendingAction &pending_action() const noexcept {
 		return pending_action_;
 	}

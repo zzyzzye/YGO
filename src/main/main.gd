@@ -14,7 +14,11 @@ func _ready() -> void:
 	board = DUEL_BOARD_SCRIPT.new()
 	add_child(board)
 	board.idle_action_requested.connect(_on_idle_action_requested)
+	board.battle_action_requested.connect(_on_battle_action_requested)
 	board.end_turn_requested.connect(_on_end_turn_requested)
+	board.enter_battle_requested.connect(_on_enter_battle_requested)
+	board.enter_main2_requested.connect(_on_enter_main2_requested)
+	board.end_battle_requested.connect(_on_end_battle_requested)
 	board.restart_requested.connect(_on_restart_requested)
 	board.exit_requested.connect(_on_exit_requested)
 
@@ -62,7 +66,13 @@ func _refresh_board(status_text: String) -> void:
 		board.show_status("读取决斗状态失败：" + str(state.message))
 		return
 
-	var actions: Array = pending.idle_actions if int(pending.player) == 0 else []
+	var actions: Array = []
+	if int(pending.player) == 0:
+		actions = (
+			pending.get("battle_actions", [])
+			if str(pending.kind) == "battle"
+			else pending.get("idle_actions", [])
+		)
 	var player_state: Dictionary = state.players.p1
 	var opponent_state: Dictionary = state.players.p2
 	var snapshot := {
@@ -79,12 +89,16 @@ func _refresh_board(status_text: String) -> void:
 			opponent_state.deck, opponent_state.extra, opponent_state.graveyard, opponent_state.banished,
 		],
 		# 阶段球只消费明确布尔能力，不解析“玩家1 · 主阶段”等用户可见文本。
-		"local_player_turn": pending.kind == "idle" and int(pending.player) == 0,
+		"local_player_turn": pending.kind in ["idle", "battle"] and int(pending.player) == 0,
+		"phase_kind": str(pending.kind),
+		"can_enter_battle": bool(pending.get("can_enter_battle", false)),
+		"can_enter_main2": bool(pending.get("can_enter_main2", false)),
+		"can_end_battle": bool(pending.get("can_end_battle", false)),
 		"can_end_turn": pending.kind == "idle"
 			and int(pending.player) == 0
 			and bool(pending.can_end_turn),
 		"idle_actions": actions,
-		"turn_text": "玩家%s · 主阶段" % [int(pending.player) + 1] if pending.kind == "idle" else "规则处理中",
+		"turn_text": _turn_text(pending),
 		"status_text": status_text,
 		"debug_text": "OCGCore 11.0 · 消息 %s · 玩家1 卡组/手牌 %s/%s · 玩家2 卡组/手牌 %s/%s" % [
 			pending.message_type,
@@ -116,6 +130,46 @@ func _on_end_turn_requested() -> void:
 		board.show_status("结束回合失败：" + str(response.message))
 		return
 	_refresh_board("玩家1回合结束，玩家2已抽牌")
+
+func _on_enter_battle_requested() -> void:
+	_submit_phase_action("submit_enter_battle", "已进入战斗阶段")
+
+
+func _on_enter_main2_requested() -> void:
+	_submit_phase_action("submit_enter_main2", "已进入主要阶段二")
+
+
+func _on_end_battle_requested() -> void:
+	_submit_phase_action("submit_end_battle", "战斗阶段结束")
+
+
+func _submit_phase_action(method_name: String, success_text: String) -> void:
+	var response: Dictionary = bridge.call(method_name)
+	if !response.ok:
+		board.show_status("阶段切换失败：" + str(response.message))
+		return
+	_refresh_board(success_text)
+
+
+func _on_battle_action_requested(
+		action_kind: String,
+		index: int,
+		_card_data: Dictionary
+) -> void:
+	var response: Dictionary = bridge.call("submit_battle_action", action_kind, index)
+	if !response.ok:
+		board.show_status("战斗动作失败：" + str(response.message))
+		return
+	board._clear_selection()
+	_refresh_board("战斗动作已提交，场面已由 OCGCore 更新")
+
+
+func _turn_text(pending: Dictionary) -> String:
+	if str(pending.kind) == "idle":
+		return "玩家%s · 主阶段" % [int(pending.player) + 1]
+	if str(pending.kind) == "battle":
+		return "玩家%s · 战斗阶段" % [int(pending.player) + 1]
+	return "规则处理中"
 
 
 func _on_restart_requested() -> void:
