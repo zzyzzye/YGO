@@ -519,6 +519,10 @@ func _request_exit() -> void:
 
 
 func _open_confirmation(kind: String, message: String) -> void:
+	# restart/exit 属于本地工具确认，不能覆盖 OCGCore 正在等待的 YesNo、
+	# SelectCard 或攻击路线入口；只有新规则快照清理后才允许打开普通确认。
+	if _rule_decision_kind != "none":
+		return
 	_confirmation_kind = kind
 	confirmation_label.text = message
 	_clear_confirmation_buttons()
@@ -530,6 +534,10 @@ func _open_confirmation(kind: String, message: String) -> void:
 	confirmation_overlay.visible = true
 
 func _open_phase_options(options: Array) -> void:
+	# 阶段选项同样只是本地快捷入口。规则决策未完成时即使阶段能力仍留在快照中，
+	# 也必须保留规则控件，不能让普通取消把核心置于无人可响应的等待状态。
+	if _rule_decision_kind != "none":
+		return
 	_confirmation_kind = ""
 	confirmation_label.text = "选择要前往的阶段"
 	_clear_confirmation_buttons()

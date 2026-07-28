@@ -472,6 +472,9 @@ func _run() -> void:
 		"selection_min": 1,
 		"selection_max": 1,
 		"selection_cancelable": false,
+		"phase_kind": "idle",
+		"can_enter_battle": true,
+		"can_end_turn": true,
 		"opponent_monsters": [opponent_monster_0, opponent_monster_2],
 		"card_options": [
 			{
@@ -518,6 +521,26 @@ func _run() -> void:
 	):
 		_fail("可取消目标选择必须只显示“取消攻击”按钮")
 		return
+	for ordinary_control in [
+		board.restart_button,
+		board.exit_button,
+		board.phase_button,
+	]:
+		ordinary_control.pressed.emit()
+		if (
+			board.confirmation_overlay.visible
+			or board.confirmation_buttons.get_child_count() != 0
+			or !board.opponent_monster_zones[2].target_highlight.visible
+			or (
+				board.opponent_monster_zones[2].target_highlight.theme_type_variation
+				!= &"TargetHighlight"
+			)
+			or !board.action_box.visible
+			or board.action_box.get_child_count() != 1
+			or str(board.action_box.get_child(0).text) != "取消攻击"
+		):
+			_fail("SelectCard 期间普通系统或阶段确认不得覆盖规则目标与取消入口")
+			return
 	board._handle_surface_click(board.turn_label)
 	if (
 		!board.action_box.visible
@@ -544,6 +567,9 @@ func _run() -> void:
 		"decision_kind": "yes_no",
 		"decision_description": 99,
 		"local_player_turn": true,
+		"phase_kind": "idle",
+		"can_enter_battle": true,
+		"can_end_turn": true,
 		"opponent_monsters": [opponent_monster_0],
 	})
 	var yes_no_texts: Array[String] = []
@@ -563,6 +589,18 @@ func _run() -> void:
 	if _card_selection_cancel_events.size() != 1:
 		_fail("新快照清除的旧取消按钮不得继续发出规则请求")
 		return
+	for ordinary_control in [
+		board.restart_button,
+		board.exit_button,
+		board.phase_button,
+	]:
+		ordinary_control.pressed.emit()
+		yes_no_texts.clear()
+		for child in board.confirmation_buttons.get_children():
+			yes_no_texts.append(str(child.text))
+		if !board.confirmation_overlay.visible or yes_no_texts != ["是", "否"]:
+			_fail("通用 Yes/No 期间普通系统或阶段确认不得覆盖是/否入口")
+			return
 	board._handle_surface_click(board.turn_label)
 	yes_no_texts.clear()
 	for child in board.confirmation_buttons.get_children():
