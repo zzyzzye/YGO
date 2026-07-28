@@ -13,6 +13,9 @@ const LONG_STATUS := (
 )
 const STATUS_HAND_SAFE_GAP := 24.0
 const LAYOUT_STABILITY_LIMIT := 12
+const EXPECTED_ZONE_COUNT := 5
+const EXPECTED_TOTAL_ZONE_COUNT := 20
+const EXPECTED_SYSTEM_BUTTON_COUNT := 3
 const SCENARIO_DIRECT_ATTACK := "直击 LP 与怪兽预览"
 const SCENARIO_FIVE_TARGETS := "五个合法怪兽目标"
 const SCENARIO_GENERIC_YES_NO := "通用 YesNo 确认"
@@ -328,6 +331,13 @@ func _assert_populated_layout(
 		])
 		return
 	var tools := tools_node as HBoxContainer
+	if tools.get_child_count() != EXPECTED_SYSTEM_BUTTON_COUNT:
+		_fail("系统工具必须恰好包含三个 BaseButton：窗口 %s，状态 %s，实际 %s 个" % [
+			physical_size,
+			scenario_name,
+			tools.get_child_count(),
+		])
+		return
 	var phase := board.phase_button
 	for themed_control in [
 		{"control": phase, "variation": &"PhaseButton", "name": "阶段球"},
@@ -341,8 +351,15 @@ func _assert_populated_layout(
 				% [themed_control.name, physical_size, scenario_name]
 			)
 			return
-	for child_index in range(tools.get_child_count()):
+	for child_index in range(EXPECTED_SYSTEM_BUTTON_COUNT):
 		var tool_button := tools.get_child(child_index)
+		if !(tool_button is BaseButton):
+			_fail("系统工具第 %s 项不是 BaseButton：窗口 %s，状态 %s" % [
+				child_index + 1,
+				physical_size,
+				scenario_name,
+			])
+			return
 		if !_assert_control_geometry(
 			tool_button,
 			logical_rect,
@@ -384,6 +401,8 @@ func _assert_populated_layout(
 	)
 	if !bool(opponent_hand_result.ok):
 		return
+	if !_assert_fixed_zone_cardinality(board, physical_size, scenario_name):
+		return
 	var all_zones := (
 		board.player_monster_zones
 		+ board.player_spell_zones
@@ -410,6 +429,48 @@ func _assert_populated_layout(
 		physical_size,
 		scenario_name
 	)
+
+
+func _assert_fixed_zone_cardinality(
+	board: DuelBoard,
+	physical_size: Vector2i,
+	scenario_name: String
+) -> bool:
+	# 四组卡位是稳定场景契约。先锁定每组与总数，再按固定下标检查内容，
+	# 避免场景误删节点后循环随数组缩短而产生假绿。
+	var zone_groups := [
+		{"name": "玩家怪兽区", "zones": board.player_monster_zones},
+		{"name": "玩家魔陷区", "zones": board.player_spell_zones},
+		{"name": "对手怪兽区", "zones": board.opponent_monster_zones},
+		{"name": "对手魔陷区", "zones": board.opponent_spell_zones},
+	]
+	var total_zone_count := 0
+	for group in zone_groups:
+		var zones: Array = group.zones
+		if zones.size() != EXPECTED_ZONE_COUNT:
+			_fail("%s 必须恰好包含五个卡位：窗口 %s，状态 %s，实际 %s 个" % [
+				group.name,
+				physical_size,
+				scenario_name,
+				zones.size(),
+			])
+			return false
+		total_zone_count += zones.size()
+	if total_zone_count != EXPECTED_TOTAL_ZONE_COUNT:
+		_fail("四组固定卡位合计必须恰好二十个：窗口 %s，状态 %s，实际 %s 个" % [
+			physical_size,
+			scenario_name,
+			total_zone_count,
+		])
+		return false
+	if board.opponent_monster_zones.size() != EXPECTED_ZONE_COUNT:
+		_fail("对手怪兽目标卡位必须恰好包含五个：窗口 %s，状态 %s，实际 %s 个" % [
+			physical_size,
+			scenario_name,
+			board.opponent_monster_zones.size(),
+		])
+		return false
+	return true
 
 
 func _assert_control_geometry(
@@ -581,7 +642,8 @@ func _assert_scenario_layout(
 		):
 			_fail("直击 LP 高亮未完整覆盖点击面：窗口 " + str(physical_size))
 			return
-		for zone_index in range(board.opponent_monster_zones.size()):
+		var preview_highlight_count := 0
+		for zone_index in range(EXPECTED_ZONE_COUNT):
 			var zone: ZoneView = board.opponent_monster_zones[zone_index]
 			if (
 				!_assert_control_geometry(
@@ -597,6 +659,13 @@ func _assert_scenario_layout(
 			if zone.target_highlight.theme_type_variation != &"AttackTargetPreview":
 				_fail("五个对手怪兽必须全部显示攻击预览：窗口 " + str(physical_size))
 				return
+			preview_highlight_count += 1
+		if preview_highlight_count != EXPECTED_ZONE_COUNT:
+			_fail("直击状态必须恰好显示五个攻击预览高亮：窗口 %s，实际 %s 个" % [
+				physical_size,
+				preview_highlight_count,
+			])
+			return
 		if (
 			board.action_box.is_visible_in_tree()
 			or board.confirmation_overlay.is_visible_in_tree()
@@ -686,7 +755,8 @@ func _assert_five_target_highlights(
 			scenario_name,
 		])
 		return false
-	for zone_index in range(board.opponent_monster_zones.size()):
+	var target_highlight_count := 0
+	for zone_index in range(EXPECTED_ZONE_COUNT):
 		var zone: ZoneView = board.opponent_monster_zones[zone_index]
 		if !_assert_control_geometry(
 			zone.target_highlight,
@@ -703,12 +773,21 @@ func _assert_five_target_highlights(
 				scenario_name,
 			])
 			return false
+		target_highlight_count += 1
+	if target_highlight_count != EXPECTED_ZONE_COUNT:
+		_fail("目标选择状态必须恰好显示五个合法目标高亮：窗口 %s，状态 %s，实际 %s 个" % [
+			physical_size,
+			scenario_name,
+			target_highlight_count,
+		])
+		return false
 	return true
 
 
 func _visible_target_highlight_count(board: DuelBoard) -> int:
 	var count := 0
-	for zone in board.opponent_monster_zones:
+	for zone_index in range(EXPECTED_ZONE_COUNT):
+		var zone: ZoneView = board.opponent_monster_zones[zone_index]
 		if zone.target_highlight.is_visible_in_tree():
 			count += 1
 	return count
