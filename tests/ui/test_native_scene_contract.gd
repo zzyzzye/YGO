@@ -48,6 +48,15 @@ func _run() -> void:
 		if !ResourceLoader.exists(scene_path):
 			_fail("缺少原生子场景：" + scene_path)
 			return
+	var preconfigured_zone = load(ZONE_SCENE_PATH).instantiate()
+	# DuelBoard 会先配置区域标题、再把区域加入战场容器；场景就绪后必须回填这项缓存数据。
+	preconfigured_zone.configure("测试区域")
+	root.add_child(preconfigured_zone)
+	await process_frame
+	var preconfigured_title: Label = preconfigured_zone.find_child("TitleLabel", true, false)
+	if preconfigured_title.text != "测试区域":
+		_fail("ZoneView 必须在入树后回填预先配置的区域标题")
+		return
 	var zone = load(ZONE_SCENE_PATH).instantiate()
 	root.add_child(zone)
 	await process_frame

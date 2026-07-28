@@ -14,6 +14,12 @@ var zone_label := ""
 @onready var title_label: Label = %TitleLabel
 
 
+func _ready() -> void:
+	# DuelBoard 会在区域加入场景树前设置标题；原生节点就绪后需回填缓存值，
+	# 才不会因 @onready 尚未绑定 Label 而丢失首帧区域名称。
+	title_label.text = zone_label
+
+
 func configure(label_text: String) -> void:
 	zone_label = label_text
 	if title_label:
