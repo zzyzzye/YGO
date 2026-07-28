@@ -144,6 +144,7 @@ add_subdirectory(
 
 add_library(ygo_core SHARED
 	src/register_types.cpp
+	src/pending_action_godot_adapter.cpp
 	src/ygo_core_bridge.cpp
 )
 target_include_directories(ygo_core PRIVATE include)
@@ -157,3 +158,84 @@ set_target_properties(ygo_core PROPERTIES
 	LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../bin/macos"
 	RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../bin/macos"
 )
+
+# 该测试必须在 Godot 进程内运行，才能使用真实的 Variant/Dictionary ABI。
+# CMake 在 build/ 内生成最小测试工程，CTest 启动一次无界面运行时并加载专用
+# GDExtension；测试源码不会进入正式 ygo_core 动态库。
+set(PENDING_ACTION_ADAPTER_TEST_PROJECT
+	"${CMAKE_CURRENT_BINARY_DIR}/pending_action_adapter_test_project"
+)
+file(MAKE_DIRECTORY "${PENDING_ACTION_ADAPTER_TEST_PROJECT}/.godot")
+add_library(test_pending_action_godot_adapter SHARED
+	src/pending_action_godot_adapter.cpp
+	src/ygo_core_bridge.cpp
+	tests/test_pending_action_godot_adapter.cpp
+)
+target_include_directories(test_pending_action_godot_adapter PRIVATE include)
+target_link_libraries(test_pending_action_godot_adapter PRIVATE
+	godot::cpp
+	ygo_duel_session
+	ygo_card_repository
+)
+set_target_properties(test_pending_action_godot_adapter PROPERTIES
+	OUTPUT_NAME "test_pending_action_godot_adapter"
+	LIBRARY_OUTPUT_DIRECTORY "${PENDING_ACTION_ADAPTER_TEST_PROJECT}/bin"
+	RUNTIME_OUTPUT_DIRECTORY "${PENDING_ACTION_ADAPTER_TEST_PROJECT}/bin"
+)
+file(GENERATE
+	OUTPUT "${PENDING_ACTION_ADAPTER_TEST_PROJECT}/project.godot"
+	CONTENT
+"[application]
+
+config/name=\"PendingAction Godot 适配器契约测试\"
+
+[rendering]
+
+renderer/rendering_method=\"gl_compatibility\"
+"
+)
+file(GENERATE
+	OUTPUT "${PENDING_ACTION_ADAPTER_TEST_PROJECT}/test_pending_action_godot_adapter.gdextension"
+	CONTENT
+"[configuration]
+
+entry_symbol=\"ygo_pending_action_adapter_test_init\"
+compatibility_minimum=\"4.6\"
+
+[libraries]
+
+macos.debug=\"res://bin/$<TARGET_FILE_NAME:test_pending_action_godot_adapter>\"
+macos.release=\"res://bin/$<TARGET_FILE_NAME:test_pending_action_godot_adapter>\"
+"
+)
+file(GENERATE
+	OUTPUT "${PENDING_ACTION_ADAPTER_TEST_PROJECT}/.godot/extension_list.cfg"
+	CONTENT "res://test_pending_action_godot_adapter.gdextension\n"
+)
+file(GENERATE
+	OUTPUT "${PENDING_ACTION_ADAPTER_TEST_PROJECT}/adapter_test_runner.gd"
+	CONTENT
+"extends SceneTree
+
+
+func _initialize() -> void:
+	# 契约断言在 GDExtension 场景级初始化时执行；脚本只负责干净退出运行时。
+	quit()
+"
+)
+find_program(YGO_GODOT_EXECUTABLE
+	NAMES godot Godot
+	HINTS "/Applications/Godot.app/Contents/MacOS"
+)
+if(YGO_GODOT_EXECUTABLE)
+	add_test(
+		NAME pending_action_godot_adapter
+		COMMAND
+			"${YGO_GODOT_EXECUTABLE}"
+			--headless
+			--path "${PENDING_ACTION_ADAPTER_TEST_PROJECT}"
+			--script res://adapter_test_runner.gd
+	)
+else()
+	message(WARNING "未找到 Godot，可构建但不会注册 PendingAction 适配器运行测试")
+endif()

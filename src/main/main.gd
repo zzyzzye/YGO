@@ -107,9 +107,17 @@ func _refresh_board(status_text: String) -> void:
 		# MSG_WIN 后 OCGCore 可能仍保留最后一个决策快照；终局标志必须优先
 		# 关闭本地动作，避免玩家在已经结束的决斗上继续提交阶段响应。
 		"local_player_turn": !game_over
-			and pending.kind in ["idle", "battle"]
+			and pending.kind in ["idle", "battle", "yes_no", "select_card"]
 			and int(pending.player) == 0,
 		"phase_kind": str(pending.kind),
+		# Task 3 只把 C++ 已校验的决策语义继续交给 DuelBoard 快照。
+		# 目标确认与候选交互由后续子场景实现，Main 不提前改写规则状态。
+		"decision_kind": str(pending.kind),
+		"decision_description": int(pending.get("description", 0)),
+		"selection_cancelable": bool(pending.get("cancelable", false)),
+		"selection_min": int(pending.get("min_select", 0)),
+		"selection_max": int(pending.get("max_select", 0)),
+		"card_options": pending.get("card_options", []),
 		"can_enter_battle": bool(pending.get("can_enter_battle", false)),
 		"can_enter_main2": bool(pending.get("can_enter_main2", false)),
 		"can_end_battle": bool(pending.get("can_end_battle", false)),

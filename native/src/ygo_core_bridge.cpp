@@ -1,4 +1,5 @@
 #include "ygo/ygo_core_bridge.hpp"
+#include "ygo/pending_action_godot_adapter.hpp"
 
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/array.hpp>
@@ -17,28 +18,6 @@
 namespace ygo {
 
 namespace {
-
-const char *idle_action_kind_name(const IdleActionKind kind) {
-	switch (kind) {
-	case IdleActionKind::NormalSummon:
-		return "normal_summon";
-	case IdleActionKind::SpecialSummon:
-		return "special_summon";
-	case IdleActionKind::Reposition:
-		return "reposition";
-	case IdleActionKind::MonsterSet:
-		return "monster_set";
-	case IdleActionKind::SpellTrapSet:
-		return "spell_trap_set";
-	case IdleActionKind::Activate:
-		return "activate";
-	}
-	return "unknown";
-}
-
-const char *battle_action_kind_name(const BattleActionKind kind) {
-	return kind == BattleActionKind::Activate ? "battle_activate" : "attack";
-}
 
 godot::Dictionary card_to_dictionary(
 		const CardDatabase &database,
@@ -87,73 +66,6 @@ godot::Array hidden_cards_to_array(
 		cards.push_back(item);
 	}
 	return cards;
-}
-
-godot::Dictionary pending_action_to_dictionary(const PendingAction &pending) {
-	godot::Dictionary response;
-	switch (pending.kind) {
-	case PendingActionKind::None:
-		response["kind"] = godot::String("none");
-		break;
-	case PendingActionKind::Idle:
-		response["kind"] = godot::String("idle");
-		break;
-	case PendingActionKind::Battle:
-		response["kind"] = godot::String("battle");
-		break;
-	case PendingActionKind::AutoPassChain:
-		response["kind"] = godot::String("auto_pass_chain");
-		break;
-	case PendingActionKind::AutoSelectPlace:
-		response["kind"] = godot::String("auto_select_place");
-		break;
-	case PendingActionKind::Retry:
-		response["kind"] = godot::String("retry");
-		break;
-	case PendingActionKind::Unsupported:
-		response["kind"] = godot::String("unsupported");
-		break;
-	case PendingActionKind::Malformed:
-		response["kind"] = godot::String("malformed");
-		break;
-	}
-	response["player"] = pending.player;
-	response["can_end_turn"] = pending.can_end_turn;
-	response["can_enter_battle"] = pending.can_enter_battle;
-	response["can_enter_main2"] = pending.can_enter_main2;
-	response["can_end_battle"] = pending.can_end_battle;
-	response["message_type"] = pending.message_type;
-	response["message"] = godot::String::utf8(pending.message.c_str());
-	godot::Array idle_actions;
-	for (const auto &action : pending.idle_actions) {
-		godot::Dictionary item;
-		item["action_kind"] = godot::String(idle_action_kind_name(action.kind));
-		item["index"] = static_cast<std::int64_t>(action.index);
-		item["card_id"] = static_cast<std::int64_t>(action.card_id);
-		item["controller"] = action.controller;
-		item["location"] = action.location;
-		item["sequence"] = static_cast<std::int64_t>(action.sequence);
-		item["description"] = static_cast<std::int64_t>(action.description);
-		item["client_mode"] = action.client_mode;
-		idle_actions.push_back(item);
-	}
-	response["idle_actions"] = idle_actions;
-	godot::Array battle_actions;
-	for (const auto &action : pending.battle_actions) {
-		godot::Dictionary item;
-		item["action_kind"] = godot::String(battle_action_kind_name(action.kind));
-		item["index"] = static_cast<std::int64_t>(action.index);
-		item["card_id"] = static_cast<std::int64_t>(action.card_id);
-		item["controller"] = action.controller;
-		item["location"] = action.location;
-		item["sequence"] = static_cast<std::int64_t>(action.sequence);
-		item["description"] = static_cast<std::int64_t>(action.description);
-		item["client_mode"] = action.client_mode;
-		item["direct_attackable"] = action.direct_attackable;
-		battle_actions.push_back(item);
-	}
-	response["battle_actions"] = battle_actions;
-	return response;
 }
 
 godot::Dictionary process_result_to_dictionary(const ProcessResult &result) {
@@ -683,6 +595,81 @@ godot::Dictionary YgoCoreBridge::submit_battle_action(
 			: process_result_to_dictionary(result);
 }
 
+godot::Dictionary YgoCoreBridge::submit_yes_no(const bool accepted) {
+	if (!session_ || !session_->is_active()) {
+		return process_result_to_dictionary({
+				false, OCG_DUEL_STATUS_END, "决斗尚未创建", {}});
+	}
+	if (session_->winner() >= 0) {
+		return process_result_to_dictionary({
+				false, OCG_DUEL_STATUS_END, "决斗已经结束，不能继续提交动作",
+				session_->pending_action()});
+	}
+	if (session_->pending_action().player != 0) {
+		return process_result_to_dictionary({
+				false, OCG_DUEL_STATUS_AWAITING, "当前不是本地玩家的操作回合",
+				session_->pending_action()});
+	}
+	const ProcessResult result = session_->submit_yes_no(accepted);
+	return result.ok
+			? process_result_to_dictionary(advance_to_local_decision(*session_, result))
+			: process_result_to_dictionary(result);
+}
+
+godot::Dictionary YgoCoreBridge::submit_card_selection(
+		const std::int64_t index) {
+	// Godot int 为有符号 64 位，Session 候选索引为 size_t。必须先拒绝
+	// 负数，避免 -1 窄化成极大的合法无符号值后绕过边界诊断。
+	if (index < 0) {
+		return process_result_to_dictionary({
+				false,
+				OCG_DUEL_STATUS_AWAITING,
+				"卡牌候选索引不能为负数",
+				session_ ? session_->pending_action() : PendingAction{},
+		});
+	}
+	if (!session_ || !session_->is_active()) {
+		return process_result_to_dictionary({
+				false, OCG_DUEL_STATUS_END, "决斗尚未创建", {}});
+	}
+	if (session_->winner() >= 0) {
+		return process_result_to_dictionary({
+				false, OCG_DUEL_STATUS_END, "决斗已经结束，不能继续提交动作",
+				session_->pending_action()});
+	}
+	if (session_->pending_action().player != 0) {
+		return process_result_to_dictionary({
+				false, OCG_DUEL_STATUS_AWAITING, "当前不是本地玩家的操作回合",
+				session_->pending_action()});
+	}
+	const ProcessResult result =
+			session_->submit_card_selection(static_cast<std::size_t>(index));
+	return result.ok
+			? process_result_to_dictionary(advance_to_local_decision(*session_, result))
+			: process_result_to_dictionary(result);
+}
+
+godot::Dictionary YgoCoreBridge::cancel_card_selection() {
+	if (!session_ || !session_->is_active()) {
+		return process_result_to_dictionary({
+				false, OCG_DUEL_STATUS_END, "决斗尚未创建", {}});
+	}
+	if (session_->winner() >= 0) {
+		return process_result_to_dictionary({
+				false, OCG_DUEL_STATUS_END, "决斗已经结束，不能继续提交动作",
+				session_->pending_action()});
+	}
+	if (session_->pending_action().player != 0) {
+		return process_result_to_dictionary({
+				false, OCG_DUEL_STATUS_AWAITING, "当前不是本地玩家的操作回合",
+				session_->pending_action()});
+	}
+	const ProcessResult result = session_->cancel_card_selection();
+	return result.ok
+			? process_result_to_dictionary(advance_to_local_decision(*session_, result))
+			: process_result_to_dictionary(result);
+}
+
 godot::Dictionary YgoCoreBridge::get_duel_state() const {
 	godot::Dictionary response;
 	if (!session_ || !session_->is_active()) {
@@ -794,6 +781,15 @@ void YgoCoreBridge::_bind_methods() {
 	godot::ClassDB::bind_method(
 			godot::D_METHOD("submit_battle_action", "action_kind", "index"),
 			&YgoCoreBridge::submit_battle_action);
+	godot::ClassDB::bind_method(
+			godot::D_METHOD("submit_yes_no", "accepted"),
+			&YgoCoreBridge::submit_yes_no);
+	godot::ClassDB::bind_method(
+			godot::D_METHOD("submit_card_selection", "index"),
+			&YgoCoreBridge::submit_card_selection);
+	godot::ClassDB::bind_method(
+			godot::D_METHOD("cancel_card_selection"),
+			&YgoCoreBridge::cancel_card_selection);
 	godot::ClassDB::bind_method(
 			godot::D_METHOD("get_duel_state"),
 			&YgoCoreBridge::get_duel_state);

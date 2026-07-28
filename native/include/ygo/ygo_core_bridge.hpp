@@ -59,6 +59,11 @@ public:
 	godot::Dictionary submit_battle_action(
 			const godot::String &action_kind,
 			std::int64_t index);
+	// 是非与卡牌选择只传递稳定语义参数；成功后继续自动推进对手决策，
+	// 返回下一个本地决策快照。负索引在任何无符号窄化前由 Bridge 拒绝。
+	godot::Dictionary submit_yes_no(bool accepted);
+	godot::Dictionary submit_card_selection(std::int64_t index);
+	godot::Dictionary cancel_card_selection();
 	// 返回当前双方场上状态计数（卡组/手牌/怪兽区/魔陷区/墓地/除外区）。
 	godot::Dictionary get_duel_state() const;
 	void destroy_duel();
