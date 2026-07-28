@@ -150,6 +150,19 @@ void test_bridge_rejects_negative_selection_before_narrowing() {
 			static_cast<godot::String>(rejected["message"])
 					== godot::String::utf8("卡牌候选索引不能为负数"),
 			"负索引必须返回明确中文范围错误");
+	const godot::Dictionary negative_position = bridge->submit_position(-1);
+	require(
+			!static_cast<bool>(negative_position["ok"])
+				&& static_cast<godot::String>(negative_position["message"])
+						== godot::String::utf8("表示形式超出 OCGCore 协议范围"),
+			"负表示形式必须在窄化前拒绝");
+	const godot::Dictionary oversized_position =
+			bridge->submit_position(0x100000000LL);
+	require(
+			!static_cast<bool>(oversized_position["ok"])
+				&& static_cast<godot::String>(oversized_position["message"])
+						== godot::String::utf8("表示形式超出 OCGCore 协议范围"),
+			"超过 uint32 的表示形式必须在窄化前拒绝");
 }
 
 void run_contract_tests() {

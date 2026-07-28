@@ -14,7 +14,7 @@ signal attack_target_preview_requested(location: Dictionary)
 signal attack_target_requested(option_index: int)
 signal card_selection_cancel_requested
 signal yes_no_requested(accepted: bool)
-signal position_requested(position: int)
+signal position_requested(position: int, decision_generation: int)
 
 var player_monster_zones: Array = []
 var player_spell_zones: Array = []
@@ -56,6 +56,9 @@ var _can_enter_main2 := false
 var _can_end_battle := false
 var _rule_decision_kind := "none"
 var _card_selection_cancelable := false
+# 每次规则快照重绘都会推进代次。动态按钮绑定创建时的代次，使已经退休的
+# 节点即使在 queue_free 前残留引用，也不能提交紧随其后的同形决策。
+var _rule_decision_generation := 0
 # key 只由 OCGCore 公开的 controller/location/sequence 组成，值是同一决策帧中的
 # 候选 index；卡号不参与映射，避免同名卡或隐藏身份影响规则位置选择。
 var _card_option_indices: Dictionary = {}
@@ -278,17 +281,23 @@ func _open_position_prompt(card_id: int, options: Array) -> void:
 			continue
 		var button := Button.new()
 		button.text = str(POSITION_TEXT[selected_position])
-		button.pressed.connect(_emit_position.bind(selected_position))
+		button.pressed.connect(
+			_emit_position.bind(selected_position, _rule_decision_generation)
+		)
 		confirmation_buttons.add_child(button)
 	confirmation_overlay.visible = confirmation_buttons.get_child_count() > 0
 
 
-func _emit_position(selected_position: int) -> void:
-	if _rule_decision_kind == "select_position":
-		position_requested.emit(selected_position)
+func _emit_position(selected_position: int, decision_generation: int) -> void:
+	if (
+		_rule_decision_kind == "select_position"
+		and decision_generation == _rule_decision_generation
+	):
+		position_requested.emit(selected_position, decision_generation)
 
 
 func _clear_rule_decision_presentation() -> void:
+	_rule_decision_generation += 1
 	_rule_decision_kind = "none"
 	_card_selection_cancelable = false
 	_card_option_indices.clear()

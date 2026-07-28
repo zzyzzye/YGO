@@ -360,9 +360,13 @@ func _on_yes_no_requested(accepted: bool) -> void:
 	_submit_yes_no_response(accepted, "规则确认已提交")
 
 
-func _on_position_requested(selected_position: int) -> void:
+func _on_position_requested(
+	selected_position: int,
+	decision_generation: int
+) -> void:
 	if (
 		_submission_in_progress
+		or decision_generation != board._rule_decision_generation
 		or str(_current_pending_action.get("kind", "none")) != "select_position"
 		or int(_current_pending_action.get("player", -1)) != 0
 		or selected_position not in _current_pending_action.get("position_options", [])

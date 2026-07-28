@@ -149,6 +149,95 @@ void test_real_direct_attack_is_accepted() {
 	}
 	assert(deck.size() == 40);
 
+	// 电子龙在己方无怪兽、对手有怪兽时提供手牌特殊召唤；其脚本允许表侧
+	// 攻击或表侧守备，因此能确定性让真实 OCGCore 发出 MSG_SELECT_POSITION，
+	// 不依赖人工注入 PendingAction。
+	{
+		constexpr std::uint32_t cyber_dragon = 70095154;
+		assert(loaded.database->find(cyber_dragon) != nullptr);
+		std::vector<std::uint32_t> cyber_deck(40, cyber_dragon);
+		ygo::DuelSession position_session(loaded.database, scripts);
+		assert(position_session.create(0x59474fULL).ok);
+		assert(position_session.add_deck_cards(0, deck, LOCATION_DECK).added == 40);
+		assert(position_session.add_deck_cards(
+				1, cyber_deck, LOCATION_DECK).added == 40);
+		ygo::ProcessResult position_process = position_session.start();
+		for (int step_index = 0;
+				step_index < 100
+				&& position_process.pending_action.kind
+						== ygo::PendingActionKind::None;
+				++step_index) {
+			position_process = position_session.step();
+		}
+		assert(position_process.pending_action.kind == ygo::PendingActionKind::Idle);
+		const auto first_monster = std::find_if(
+				position_process.pending_action.idle_actions.begin(),
+				position_process.pending_action.idle_actions.end(),
+				[](const ygo::IdleAction &action) {
+					return action.kind == ygo::IdleActionKind::NormalSummon;
+				});
+		assert(first_monster != position_process.pending_action.idle_actions.end());
+		position_process = position_session.submit_idle_action(
+				first_monster->kind, first_monster->index);
+		for (int step_index = 0;
+				step_index < 100
+				&& position_process.pending_action.kind
+						== ygo::PendingActionKind::None;
+				++step_index) {
+			position_process = position_session.step();
+		}
+		assert(position_session.query_count(0, LOCATION_MZONE) == 1);
+		position_process = position_session.submit_end_turn();
+		for (int step_index = 0;
+				step_index < 100
+				&& !(position_process.pending_action.kind
+							== ygo::PendingActionKind::Idle
+						&& position_process.pending_action.player == 1);
+				++step_index) {
+			position_process = position_session.step();
+		}
+		const auto special_summon = std::find_if(
+				position_process.pending_action.idle_actions.begin(),
+				position_process.pending_action.idle_actions.end(),
+				[](const ygo::IdleAction &action) {
+					return action.kind == ygo::IdleActionKind::SpecialSummon;
+				});
+		assert(special_summon != position_process.pending_action.idle_actions.end());
+		position_process = position_session.submit_idle_action(
+				special_summon->kind, special_summon->index);
+		for (int step_index = 0;
+				step_index < 100
+				&& position_process.pending_action.kind
+						== ygo::PendingActionKind::None;
+				++step_index) {
+			position_process = position_session.step();
+		}
+		assert(position_process.pending_action.kind
+				== ygo::PendingActionKind::SelectPosition);
+		assert(position_process.pending_action.selection_card_id == cyber_dragon);
+		assert(position_process.pending_action.position_options
+				== std::vector<std::uint32_t>({
+					POS_FACEUP_ATTACK,
+					POS_FACEUP_DEFENSE,
+				}));
+		position_process =
+				position_session.submit_position(POS_FACEUP_DEFENSE);
+		for (int step_index = 0;
+				step_index < 100
+				&& position_process.pending_action.kind
+						== ygo::PendingActionKind::None;
+				++step_index) {
+			position_process = position_session.step();
+		}
+		assert(position_process.ok);
+		// 后手玩家回合开始先抽到第六张手牌，特殊召唤后应回到五张。
+		assert(position_session.query_count(1, LOCATION_HAND) == 5);
+		const auto summoned = position_session.query_cards(1, LOCATION_MZONE);
+		assert(summoned.size() == 1);
+		assert(summoned.front().card_id == cyber_dragon);
+		assert(summoned.front().position == POS_FACEUP_DEFENSE);
+	}
+
 	ygo::DuelSession session(loaded.database, scripts);
 	assert(session.create(0x424154544c45ULL).ok);
 	assert(session.add_deck_cards(0, deck, LOCATION_DECK).added == 40);

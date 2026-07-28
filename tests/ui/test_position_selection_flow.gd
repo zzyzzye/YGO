@@ -16,6 +16,7 @@ class FakeBridge:
 	var calls: Array[Dictionary] = []
 	var fail_next := false
 	var reject_next := false
+	var continue_position := false
 
 	func initialize_card_database(_root: String) -> Dictionary:
 		return {"ok": true}
@@ -82,13 +83,23 @@ class FakeBridge:
 				"message": "OCGCore 拒绝测试位置响应",
 				"pending_action": pending.duplicate(true),
 			}
-		pending = {
-			"kind": "idle",
-			"player": 0,
-			"message_type": 11,
-			"can_end_turn": true,
-			"idle_actions": [],
-		}
+		pending = (
+			{
+				"kind": "select_position",
+				"player": 0,
+				"message_type": 19,
+				"selection_card_id": 100002,
+				"position_options": [1, 8],
+			}
+			if continue_position
+			else {
+				"kind": "idle",
+				"player": 0,
+				"message_type": 11,
+				"can_end_turn": true,
+				"idle_actions": [],
+			}
+		)
 		return {
 			"ok": true,
 			"response_rejected": false,
@@ -147,6 +158,8 @@ func _run() -> void:
 		return
 
 	var stale_button: Button = board.confirmation_buttons.get_child(2)
+	var stale_generation: int = board._rule_decision_generation
+	fake.continue_position = true
 	stale_button.pressed.emit()
 	if fake.calls.size() != 3 or int(fake.calls.back().position) != 8:
 		_fail("合法按钮必须提交 C++ 候选中的稳定单值")
@@ -154,9 +167,14 @@ func _run() -> void:
 	# 同步刷新已替换规则快照，但旧节点要到帧末才真正释放；在同一调用栈
 	# 再发一次信号可准确覆盖双击/重入门禁。
 	stale_button.pressed.emit()
+	board.position_requested.emit(8, stale_generation)
 	await process_frame
-	if fake.calls.size() != 3 or board.confirmation_overlay.visible:
-		_fail("成功后的旧按钮信号不得重复提交新快照")
+	if (
+		fake.calls.size() != 3
+		or !board.confirmation_overlay.visible
+		or _button_texts(board.confirmation_buttons) != ["表侧攻击", "里侧守备"]
+	):
+		_fail("连续 SelectPosition 中旧代次信号不得提交下一份决策")
 		return
 
 	main.queue_free()
