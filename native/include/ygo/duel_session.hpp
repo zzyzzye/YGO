@@ -99,6 +99,13 @@ public:
 	// 表示形式只接受解析器发布的离散 OCGCore 常量；组合值和过期快照均在
 	// 写入 core 前拒绝，MSG_RETRY 时由通用恢复逻辑还原完整候选。
 	[[nodiscard]] ProcessResult submit_position(std::uint32_t position);
+	// 区域选择必须完整匹配当前 MSG_SELECT_PLACE 快照中的玩家、区域与序号。
+	// Session 统一构造三字节协议响应并保存重试上下文，调用方不能自行按位图
+	// 推导卡位，也不能在核心拒绝后丢失原有候选。
+	[[nodiscard]] ProcessResult submit_place(
+			std::uint8_t player,
+			std::uint8_t location,
+			std::uint8_t sequence);
 	// 分别对应 MSG_SELECT_BATTLECMD 的 type=2（主要阶段二）和 type=3（结束）。
 	[[nodiscard]] ProcessResult submit_enter_main2();
 	[[nodiscard]] ProcessResult submit_end_battle();
@@ -132,9 +139,6 @@ private:
 	void *duel_ = nullptr;
 	PendingAction pending_action_;
 	PendingAction last_submitted_action_;
-	// 只有召唤/盖放动作的紧随后续区域选择才允许确定性自动选区。
-	// 效果处理产生的选区必须交回上层，避免擅自替玩家决定效果目标。
-	bool allow_auto_select_place_ = false;
 	std::array<std::int32_t, 2> life_points_{8000, 8000};
 	int winner_ = -1;
 	int win_reason_ = -1;

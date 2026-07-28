@@ -17,9 +17,6 @@ enum class PendingActionKind {
 	SelectChain,
 	AutoPassChain,
 	SelectPlace,
-	// 旧会话分支在 Task 2 清理前仍引用该值，以保持分阶段迁移可以编译。它必须
-	// 与 SelectPlace 保持不同数值：解析器发布新决策时，旧分支不得自动提交首项。
-	AutoSelectPlace,
 	Retry,
 	Unsupported,
 	Malformed,

@@ -38,6 +38,30 @@ std::shared_ptr<ygo::CardDatabase> create_database() {
 	return ygo::CardDatabase::from_records(std::move(records), {});
 }
 
+ygo::ProcessResult advance_through_place_requests(
+		ygo::DuelSession &session,
+		const ygo::ProcessResult &process) {
+	// 旧有流程只关心后续规则结算。核心可能先返回 CONTINUE，再在下一次
+	// step() 中请求区域；测试在每个真实 SelectPlace 决策点明确提交首项，
+	// 绝不依赖 Session 暗选，且保留其他决策类型给各自测试断言处理。
+	ygo::ProcessResult result = process;
+	for (int step_index = 0; step_index < 100; ++step_index) {
+		if (result.pending_action.kind == ygo::PendingActionKind::None) {
+			result = session.step();
+			continue;
+		}
+		if (result.pending_action.kind != ygo::PendingActionKind::SelectPlace) {
+			break;
+		}
+		assert(!result.pending_action.place_options.empty());
+		const ygo::PlaceOption option =
+				result.pending_action.place_options.front();
+		result = session.submit_place(option.player, option.location, option.sequence);
+	}
+	assert(result.pending_action.kind != ygo::PendingActionKind::SelectPlace);
+	return result;
+}
+
 void test_real_callbacks_create_and_destroy_duel() {
 	ygo::test::TemporaryDirectory fixture;
 	fixture.write_text("scripts/constant.lua", "");
@@ -79,6 +103,7 @@ void test_inactive_session_rejects_end_turn() {
 	assert(!session.submit_enter_battle().ok);
 	assert(!session.submit_enter_main2().ok);
 	assert(!session.submit_position(POS_FACEUP_ATTACK).ok);
+	assert(!session.submit_place(0, LOCATION_MZONE, 3).ok);
 	assert(!session.submit_end_battle().ok);
 	assert(!session.submit_battle_action(ygo::BattleActionKind::Attack, 0).ok);
 }
@@ -220,6 +245,7 @@ void test_fixed_real_decks_offer_local_chain_and_continue_after_response() {
 		process = advance_empty(session->submit_idle_action(
 				set_pot->kind,
 				set_pot->index));
+		process = advance_through_place_requests(*session, process);
 		assert(process.pending_action.kind == ygo::PendingActionKind::Idle);
 		assert(process.pending_action.player == 1);
 		assert(session->query_count(1, LOCATION_SZONE) == 1);
@@ -353,6 +379,12 @@ void test_chain_submission_validates_snapshot_and_recovers_after_retry() {
 			});
 	assert(monster_set != process.pending_action.idle_actions.end());
 	process = session.submit_idle_action(monster_set->kind, monster_set->index);
+	process = advance_through_place_requests(session, process);
+	if (process.pending_action.kind == ygo::PendingActionKind::SelectPosition) {
+		assert(!process.pending_action.position_options.empty());
+		process = session.submit_position(
+				process.pending_action.position_options.front());
+	}
 	for (int step_index = 0;
 			step_index < 100
 			&& process.pending_action.kind == ygo::PendingActionKind::None;
@@ -543,6 +575,8 @@ void test_real_direct_attack_is_accepted() {
 		assert(first_monster != position_process.pending_action.idle_actions.end());
 		position_process = position_session.submit_idle_action(
 				first_monster->kind, first_monster->index);
+		position_process = advance_through_place_requests(
+				position_session, position_process);
 		for (int step_index = 0;
 				step_index < 100
 				&& position_process.pending_action.kind
@@ -569,6 +603,8 @@ void test_real_direct_attack_is_accepted() {
 		assert(special_summon != position_process.pending_action.idle_actions.end());
 		position_process = position_session.submit_idle_action(
 				special_summon->kind, special_summon->index);
+		position_process = advance_through_place_requests(
+				position_session, position_process);
 		for (int step_index = 0;
 				step_index < 100
 				&& position_process.pending_action.kind
@@ -630,6 +666,7 @@ void test_real_direct_attack_is_accepted() {
 			});
 	assert(summon != process.pending_action.idle_actions.end());
 	process = advance(session.submit_idle_action(summon->kind, summon->index));
+	process = advance_through_place_requests(session, process);
 	assert(process.pending_action.kind == ygo::PendingActionKind::Idle);
 	process = advance(session.submit_enter_battle());
 	assert(process.pending_action.kind == ygo::PendingActionKind::Battle);
@@ -749,6 +786,7 @@ void test_fixed_real_decks_advance_to_second_players_idle_action() {
 	assert(session.query_count(0, LOCATION_MZONE) == 0);
 
 	process = session.submit_idle_action(monster_set->kind, monster_set->index);
+	process = advance_through_place_requests(session, process);
 	for (int step_index = 0;
 			step_index < 100
 			&& process.pending_action.kind == ygo::PendingActionKind::None;
@@ -853,6 +891,30 @@ void test_fixed_real_decks_advance_to_second_players_idle_action() {
 			++step_index) {
 		replay_process = replay.step();
 	}
+	// 真实通常召唤必须停在 MSG_SELECT_PLACE，而非由 Session 暗中选取第一个
+	// 卡位。序号 3 是空怪兽区的有效候选，用它验证完整三元组会被核心接受。
+	assert(replay_process.pending_action.kind
+			== ygo::PendingActionKind::SelectPlace);
+	const auto middle_monster_zone = std::find_if(
+			replay_process.pending_action.place_options.begin(),
+			replay_process.pending_action.place_options.end(),
+			[](const ygo::PlaceOption &option) {
+				return option.player == 0 && option.location == LOCATION_MZONE
+						&& option.sequence == 3;
+			});
+	assert(middle_monster_zone != replay_process.pending_action.place_options.end());
+	const ygo::ProcessResult submitted_place =
+			replay.submit_place(0, LOCATION_MZONE, 3);
+	assert(submitted_place.ok);
+	assert(!replay.submit_place(0, LOCATION_MZONE, 3).ok);
+	assert(!replay.submit_place(0, LOCATION_MZONE, 2).ok);
+	replay_process = submitted_place;
+	for (int step_index = 0;
+			step_index < 100
+			&& replay_process.pending_action.kind == ygo::PendingActionKind::None;
+			++step_index) {
+		replay_process = replay.step();
+	}
 	assert(replay_process.ok);
 	// 当前通常怪兽只能表侧攻击召唤，OCGCore 会直接采用唯一位置而不询问；
 	// 若将来卡池规则返回多候选，则同一真实流程必须消费 SelectPosition。
@@ -908,6 +970,7 @@ void test_fixed_real_decks_advance_to_second_players_idle_action() {
 			replay_summon->index);
 	assert(replay_process.ok);
 	assert(!replay_process.response_rejected);
+	replay_process = advance_through_place_requests(replay, replay_process);
 	for (int step_index = 0;
 			step_index < 100
 			&& replay_process.pending_action.kind == ygo::PendingActionKind::None;
@@ -987,6 +1050,48 @@ void test_fixed_real_decks_advance_to_second_players_idle_action() {
 			== "表示形式不属于当前 OCGCore 候选列表");
 	assert(invalid_position.pending_action.position_options
 			== submitted_position.position_options);
+
+	// 效果产生的区域选择同样必须保留为 SelectPlace。这里故意把快照提交给
+	// 真实 Idle Processor，使核心返回 MSG_RETRY；恢复后的区域候选不能丢失，
+	// 更不能被会话改写为 Unsupported。
+	ygo::PendingAction submitted_place_retry;
+	submitted_place_retry.kind = ygo::PendingActionKind::SelectPlace;
+	submitted_place_retry.player = 0;
+	submitted_place_retry.message_type = MSG_SELECT_PLACE;
+	submitted_place_retry.message = "请选择效果放置区域";
+	submitted_place_retry.place_options = {
+		{0, LOCATION_MZONE, 3},
+		{1, LOCATION_SZONE, 1},
+	};
+	replay.last_submitted_action_ = {};
+	replay.pending_action_ = submitted_place_retry;
+	const ygo::ProcessResult place_retry =
+			replay.submit_place(0, LOCATION_MZONE, 3);
+	assert(place_retry.ok);
+	assert(place_retry.response_rejected);
+	assert(place_retry.pending_action.kind
+			== ygo::PendingActionKind::SelectPlace);
+	assert(place_retry.pending_action.kind
+			!= ygo::PendingActionKind::Unsupported);
+	assert(place_retry.pending_action.player == submitted_place_retry.player);
+	assert(place_retry.pending_action.message_type
+			== submitted_place_retry.message_type);
+	assert(place_retry.pending_action.message == submitted_place_retry.message);
+	assert(place_retry.pending_action.place_options.size() == 2);
+	assert(place_retry.pending_action.place_options[0].player == 0);
+	assert(place_retry.pending_action.place_options[0].location == LOCATION_MZONE);
+	assert(place_retry.pending_action.place_options[0].sequence == 3);
+	assert(place_retry.pending_action.place_options[1].player == 1);
+	assert(place_retry.pending_action.place_options[1].location == LOCATION_SZONE);
+	assert(place_retry.pending_action.place_options[1].sequence == 1);
+	const ygo::ProcessResult invalid_place =
+			replay.submit_place(0, LOCATION_MZONE, 2);
+	assert(!invalid_place.ok);
+	assert(!invalid_place.response_rejected);
+	assert(invalid_place.message == "区域候选不属于当前 OCGCore 候选列表");
+	assert(invalid_place.pending_action.place_options.size() == 2);
+	assert(invalid_place.pending_action.place_options[0].sequence == 3);
+	assert(invalid_place.pending_action.place_options[1].sequence == 1);
 }
 
 void test_full_local_assets_when_requested() {

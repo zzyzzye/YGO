@@ -60,8 +60,8 @@ const char *pending_action_kind_name(const PendingActionKind kind) {
 		return "select_chain";
 	case PendingActionKind::AutoPassChain:
 		return "auto_pass_chain";
-	case PendingActionKind::AutoSelectPlace:
-		return "auto_select_place";
+	case PendingActionKind::SelectPlace:
+		return "select_place";
 	case PendingActionKind::Retry:
 		return "retry";
 	case PendingActionKind::Unsupported:

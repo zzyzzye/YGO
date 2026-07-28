@@ -221,16 +221,6 @@ ProcessResult DuelSession::process_once() {
 			winner_ = pending_action_.winner;
 			win_reason_ = pending_action_.win_reason;
 		}
-		if (pending_action_.kind == PendingActionKind::AutoSelectPlace
-				&& !allow_auto_select_place_) {
-			pending_action_ = {
-					PendingActionKind::Unsupported,
-					pending_action_.player,
-					false,
-					MSG_SELECT_PLACE,
-					"当前区域选择不属于召唤或盖放后续步骤，需要玩家明确选择",
-			};
-		}
 		if (pending_action_.kind == PendingActionKind::Retry
 				&& last_submitted_action_.kind != PendingActionKind::None) {
 			// MSG_RETRY 本身不重复携带原决策字段。必须恢复提交前的完整
@@ -242,38 +232,20 @@ ProcessResult DuelSession::process_once() {
 				&& pending_action_.kind != PendingActionKind::AutoPassChain) {
 			last_submitted_action_ = {};
 		}
-		if (pending_action_.kind != PendingActionKind::AutoPassChain
-				&& pending_action_.kind != PendingActionKind::AutoSelectPlace) {
+		if (pending_action_.kind != PendingActionKind::AutoPassChain) {
 			break;
 		}
 
-		if (pending_action_.kind == PendingActionKind::AutoPassChain) {
-			// 非强制且无候选项的连锁窗口没有用户可做的选择。按上游
-			// SelectChain 协议提交 int32(-1)，避免把协议维护步骤暴露给界面。
-			const std::uint8_t pass_response[4]{0xff, 0xff, 0xff, 0xff};
-			OCG_DuelSetResponse(
-					static_cast<OCG_Duel>(duel_),
-					pass_response,
-					sizeof(pass_response));
-		} else {
-			// 首版功能场确定性使用第一个合法区域。候选列表仍保留在解析模型中，
-			// 后续可直接改为由前端高亮并提交具体区域，而无需重新解释位掩码。
-			const PlaceOption &place = pending_action_.place_options.front();
-			const std::uint8_t place_response[3]{
-					place.player,
-					place.location,
-					place.sequence,
-			};
-			OCG_DuelSetResponse(
-					static_cast<OCG_Duel>(duel_),
-					place_response,
-					sizeof(place_response));
-			allow_auto_select_place_ = false;
-		}
+		// 非强制且无候选项的连锁窗口没有用户可做的选择。按上游
+		// SelectChain 协议提交 int32(-1)，避免把协议维护步骤暴露给界面。
+		const std::uint8_t pass_response[4]{0xff, 0xff, 0xff, 0xff};
+		OCG_DuelSetResponse(
+				static_cast<OCG_Duel>(duel_),
+				pass_response,
+				sizeof(pass_response));
 		pending_action_ = {};
 	}
-	if (pending_action_.kind == PendingActionKind::AutoPassChain
-			|| pending_action_.kind == PendingActionKind::AutoSelectPlace) {
+	if (pending_action_.kind == PendingActionKind::AutoPassChain) {
 		pending_action_ = {
 				PendingActionKind::Malformed,
 				-1,
@@ -393,10 +365,9 @@ void DuelSession::set_response(const void *response_data, std::size_t response_s
 	// legacy 原始响应入口仍必须遵守会话状态机：响应对应当前 pending 快照，
 	// 写入 OCGCore 后将该快照保存为重试上下文并清空当前决策，step() 才能
 	// 消费响应。否则引擎已收到字节而会话仍认为用户尚未作答，兼容入口永远
-	// 无法推进。原始入口不授权后续区域自动选择，避免跨过另一个玩家决策。
+	// 无法推进。原始入口也不会推断后续区域，避免跨过另一个玩家决策。
 	last_submitted_action_ = pending_action_;
 	pending_action_ = {};
-	allow_auto_select_place_ = false;
 	OCG_DuelSetResponse(
 			static_cast<OCG_Duel>(duel_),
 			response_data,
@@ -416,7 +387,6 @@ ProcessResult DuelSession::submit_end_turn() {
 	// 高 16 位索引在此动作中固定为 0。
 	const std::uint8_t response[4]{7, 0, 0, 0};
 	last_submitted_action_ = pending_action_;
-	allow_auto_select_place_ = false;
 	OCG_DuelSetResponse(static_cast<OCG_Duel>(duel_), response, sizeof(response));
 	pending_action_ = {};
 	return process_once();
@@ -432,7 +402,6 @@ ProcessResult DuelSession::submit_enter_battle() {
 	}
 	const std::uint8_t response[4]{6, 0, 0, 0};
 	last_submitted_action_ = pending_action_;
-	allow_auto_select_place_ = false;
 	OCG_DuelSetResponse(static_cast<OCG_Duel>(duel_), response, sizeof(response));
 	pending_action_ = {};
 	return process_once();
@@ -490,11 +459,6 @@ ProcessResult DuelSession::submit_idle_action(
 			static_cast<std::uint8_t>((packed >> 24U) & 0xffU),
 	};
 	last_submitted_action_ = pending_action_;
-	allow_auto_select_place_ =
-			kind == IdleActionKind::NormalSummon
-			|| kind == IdleActionKind::SpecialSummon
-			|| kind == IdleActionKind::MonsterSet
-			|| kind == IdleActionKind::SpellTrapSet;
 	OCG_DuelSetResponse(static_cast<OCG_Duel>(duel_), response, sizeof(response));
 	pending_action_ = {};
 	return process_once();
@@ -529,7 +493,6 @@ ProcessResult DuelSession::submit_battle_action(
 			static_cast<std::uint8_t>((packed >> 24U) & 0xffU),
 	};
 	last_submitted_action_ = pending_action_;
-	allow_auto_select_place_ = false;
 	OCG_DuelSetResponse(static_cast<OCG_Duel>(duel_), response, sizeof(response));
 	pending_action_ = {};
 	return process_once();
@@ -551,7 +514,6 @@ ProcessResult DuelSession::submit_yes_no(const bool accepted) {
 	}
 
 	last_submitted_action_ = pending_action_;
-	allow_auto_select_place_ = false;
 	OCG_DuelSetResponse(
 			static_cast<OCG_Duel>(duel_),
 			response.bytes.data(),
@@ -577,7 +539,6 @@ ProcessResult DuelSession::submit_card_selection(
 	}
 
 	last_submitted_action_ = pending_action_;
-	allow_auto_select_place_ = false;
 	OCG_DuelSetResponse(
 			static_cast<OCG_Duel>(duel_),
 			response.bytes.data(),
@@ -602,7 +563,6 @@ ProcessResult DuelSession::cancel_card_selection() {
 	}
 
 	last_submitted_action_ = pending_action_;
-	allow_auto_select_place_ = false;
 	OCG_DuelSetResponse(
 			static_cast<OCG_Duel>(duel_),
 			response.bytes.data(),
@@ -629,7 +589,6 @@ ProcessResult DuelSession::submit_chain(const std::size_t option_index) {
 	// 只有成功构造且仍对应当前快照的响应才可覆盖重试上下文。随后立即清空
 	// pending，防止调用方在 OCGCore 消费该响应前重复提交同一个连锁候选。
 	last_submitted_action_ = pending_action_;
-	allow_auto_select_place_ = false;
 	OCG_DuelSetResponse(
 			static_cast<OCG_Duel>(duel_),
 			response.bytes.data(),
@@ -655,7 +614,6 @@ ProcessResult DuelSession::pass_chain() {
 	// 跳过同样必须通过语义构建器验证 forced 标记；这里不直接写 -1，避免
 	// 对手策略或未来调用方绕过强制连锁的协议门禁。
 	last_submitted_action_ = pending_action_;
-	allow_auto_select_place_ = false;
 	OCG_DuelSetResponse(
 			static_cast<OCG_Duel>(duel_),
 			response.bytes.data(),
@@ -680,7 +638,35 @@ ProcessResult DuelSession::submit_position(const std::uint32_t position) {
 	}
 
 	last_submitted_action_ = pending_action_;
-	allow_auto_select_place_ = false;
+	OCG_DuelSetResponse(
+			static_cast<OCG_Duel>(duel_),
+			response.bytes.data(),
+			static_cast<std::uint32_t>(response.bytes.size()));
+	pending_action_ = {};
+	return process_once();
+}
+
+ProcessResult DuelSession::submit_place(
+		const std::uint8_t player,
+		const std::uint8_t location,
+		const std::uint8_t sequence) {
+	if (!is_active()) {
+		return {false, OCG_DUEL_STATUS_END, "决斗尚未创建", {}};
+	}
+	const DuelResponse response =
+			build_place_response(pending_action_, player, location, sequence);
+	if (!response.ok) {
+		return {
+				false,
+				OCG_DUEL_STATUS_AWAITING,
+				response.message,
+				pending_action_,
+		};
+	}
+
+	// 区域响应被核心消费前先冻结当前完整快照。MSG_RETRY 只说明“重试”，
+	// 不会重复携带候选三元组；通用恢复逻辑依赖此快照还原同一决策。
+	last_submitted_action_ = pending_action_;
 	OCG_DuelSetResponse(
 			static_cast<OCG_Duel>(duel_),
 			response.bytes.data(),
@@ -820,7 +806,6 @@ void DuelSession::destroy() noexcept {
 	duel_ = nullptr;
 	pending_action_ = {};
 	last_submitted_action_ = {};
-	allow_auto_select_place_ = false;
 }
 
 bool DuelSession::is_active() const noexcept {

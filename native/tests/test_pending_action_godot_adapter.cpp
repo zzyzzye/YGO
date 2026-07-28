@@ -127,6 +127,19 @@ void test_position_selection_dictionary_contract() {
 			"表示形式离散候选不得重排或组合");
 }
 
+void test_place_selection_dictionary_uses_semantic_kind() {
+	ygo::PendingAction pending;
+	pending.kind = ygo::PendingActionKind::SelectPlace;
+	pending.player = 0;
+
+	const godot::Dictionary converted =
+			ygo::pending_action_to_dictionary(pending);
+	require(
+			static_cast<godot::String>(converted["kind"])
+					== godot::String("select_place"),
+			"区域选择必须使用 select_place kind");
+}
+
 void test_chain_dictionary_contract_hides_opponent_facedown_identity() {
 	// OCGCore 卡片脚本常用 Stringid(card_id, effect_id)，其高位可直接还原卡号。
 	// 因此对手里侧候选必须同时隐藏 card_id 与 description；仅隐藏前者仍会泄密。
@@ -244,6 +257,7 @@ void run_contract_tests() {
 	test_yes_no_dictionary_contract();
 	test_card_selection_hides_opponent_facedown_identity();
 	test_position_selection_dictionary_contract();
+	test_place_selection_dictionary_uses_semantic_kind();
 	test_chain_dictionary_contract_hides_opponent_facedown_identity();
 	test_bridge_rejects_negative_selection_before_narrowing();
 	std::fprintf(stdout, "PendingAction Godot 适配器契约测试通过\n");

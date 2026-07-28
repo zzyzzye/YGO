@@ -668,9 +668,6 @@ void test_select_place_expands_all_zone_bits_for_both_players() {
 	const ygo::PendingAction pending =
 			ygo::parse_pending_action(stream.data(), stream.size());
 	assert(pending.kind == ygo::PendingActionKind::SelectPlace);
-	// 旧会话仅会自动提交 AutoSelectPlace；新协议决策必须保留给调用方，
-	// 因而即使临时保留旧枚举值，也不能与 SelectPlace 使用同一数值。
-	assert(pending.kind != ygo::PendingActionKind::AutoSelectPlace);
 	assert(pending.player == 0);
 	assert(pending.place_options.size() == 8);
 	assert_place_option(pending.place_options[0], 0, LOCATION_MZONE, 0);
