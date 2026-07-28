@@ -2,6 +2,8 @@ extends SceneTree
 
 const CARD_SCENE_PATH := "res://src/ui/card_view.tscn"
 const THEME_PATH := "res://src/ui/themes/duel_theme.tres"
+const ZONE_SCENE_PATH := "res://src/ui/zone_view.tscn"
+const HAND_SCENE_PATH := "res://src/ui/hand_view.tscn"
 
 
 func _initialize() -> void:
@@ -42,6 +44,31 @@ func _run() -> void:
 		return
 	card.queue_free()
 	await process_frame
+	for scene_path in [ZONE_SCENE_PATH, HAND_SCENE_PATH]:
+		if !ResourceLoader.exists(scene_path):
+			_fail("缺少原生子场景：" + scene_path)
+			return
+	var zone = load(ZONE_SCENE_PATH).instantiate()
+	root.add_child(zone)
+	await process_frame
+	for node_name in ["CardContainer", "TitleLabel", "TargetHighlight", "AnimationPlayer"]:
+		if zone.find_child(node_name, true, false) == null:
+			_fail("ZoneView 缺少固定节点：" + node_name)
+			return
+	var hand = load(HAND_SCENE_PATH).instantiate()
+	root.add_child(hand)
+	await process_frame
+	hand.render_cards([{"card_id": 89631139, "sequence": 0}], false)
+	await process_frame
+	if hand.get_child_count() != 1 or hand.get_child(0).scene_file_path != CARD_SCENE_PATH:
+		_fail("HandView 必须实例化 CardView PackedScene")
+		return
+	zone.show_card({"card_id": 89631139, "sequence": 0}, false)
+	await process_frame
+	var card_container = zone.find_child("CardContainer", true, false)
+	if card_container.get_child_count() != 1:
+		_fail("ZoneView 必须把 CardView 实例放入 CardContainer")
+		return
 	print("Godot 原生场景契约通过")
 	quit(0)
 

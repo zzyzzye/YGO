@@ -1,8 +1,10 @@
 class_name DuelBoard
 extends Control
 
-const HAND_VIEW_SCRIPT = preload("res://src/ui/hand_view.gd")
-const ZONE_VIEW_SCRIPT = preload("res://src/ui/zone_view.gd")
+# HandView 与 ZoneView 的固定视觉节点由各自原生场景持有，战场只能实例化 PackedScene，
+# 不能用脚本裸构造后再让子视图在运行时补齐稳定结构。
+const HAND_VIEW_SCENE = preload("res://src/ui/hand_view.tscn")
+const ZONE_VIEW_SCENE = preload("res://src/ui/zone_view.tscn")
 
 signal idle_action_requested(action_kind: String, index: int, card_data: Dictionary)
 signal battle_action_requested(action_kind: String, index: int, card_data: Dictionary)
@@ -83,7 +85,7 @@ func _build_battlefield() -> Control:
 	panel.offset_bottom = -18
 	panel.add_theme_constant_override("separation", 7)
 
-	opponent_hand = HAND_VIEW_SCRIPT.new()
+	opponent_hand = HAND_VIEW_SCENE.instantiate()
 	opponent_hand.custom_minimum_size.y = 128
 	panel.add_child(opponent_hand)
 	opponent_spell_zones = _add_zone_row(panel, "对手魔陷", true)
@@ -100,7 +102,7 @@ func _build_battlefield() -> Control:
 
 	player_monster_zones = _add_zone_row(panel, "玩家怪兽", false)
 	player_spell_zones = _add_zone_row(panel, "玩家魔陷", false)
-	player_hand = HAND_VIEW_SCRIPT.new()
+	player_hand = HAND_VIEW_SCENE.instantiate()
 	player_hand.custom_minimum_size.y = 146
 	player_hand.card_selected.connect(_on_card_selected)
 	player_hand.card_hovered.connect(_preview_card)
@@ -116,7 +118,7 @@ func _add_zone_row(parent: VBoxContainer, prefix: String, opponent := false) -> 
 	parent.add_child(row)
 	var zones: Array = []
 	for index in range(5):
-		var zone = ZONE_VIEW_SCRIPT.new()
+		var zone = ZONE_VIEW_SCENE.instantiate()
 		row.add_child(zone)
 		var display_index := 5 - index if opponent else index + 1
 		zone.configure("%s %s" % [prefix, display_index])

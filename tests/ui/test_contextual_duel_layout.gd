@@ -1,7 +1,7 @@
 extends SceneTree
 
-const HAND_VIEW_SCRIPT = preload("res://src/ui/hand_view.gd")
-const ZONE_VIEW_SCRIPT = preload("res://src/ui/zone_view.gd")
+const HAND_VIEW_SCENE = preload("res://src/ui/hand_view.tscn")
+const ZONE_VIEW_SCENE = preload("res://src/ui/zone_view.tscn")
 const CARD_SCENE_PATH := "res://src/ui/card_view.tscn"
 const DUEL_BOARD_SCRIPT = preload("res://src/duel/duel_board.gd")
 const MAIN_SCRIPT = preload("res://src/main/main.gd")
@@ -65,7 +65,8 @@ func _initialize() -> void:
 
 
 func _run() -> void:
-	var hand = HAND_VIEW_SCRIPT.new()
+	# HandView 的固定容器样式属于原生场景；测试必须像真实界面一样实例化场景。
+	var hand: HandView = HAND_VIEW_SCENE.instantiate()
 	root.add_child(hand)
 	await process_frame
 
@@ -102,7 +103,8 @@ func _run() -> void:
 		_fail("HandView 展示背面手牌时必须显示 CardView 卡背视觉")
 		return
 
-	var zone = ZONE_VIEW_SCRIPT.new()
+	# ZoneView 的 CardContainer、标题与高亮节点由原生场景提供，禁止回退到裸脚本实例。
+	var zone: ZoneView = ZONE_VIEW_SCENE.instantiate()
 	root.add_child(zone)
 	await process_frame
 	zone.configure("测试区域")

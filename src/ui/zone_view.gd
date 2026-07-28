@@ -9,33 +9,9 @@ signal card_hovered(card_data: Dictionary)
 signal card_unhovered(card_data: Dictionary)
 
 var zone_label := ""
-var card_container: CenterContainer
-var title_label: Label
-
-
-func _ready() -> void:
-	custom_minimum_size = Vector2(105, 132)
-	var style := StyleBoxFlat.new()
-	style.bg_color = Color("#202020")
-	style.border_color = Color("#777777")
-	style.set_border_width_all(1)
-	style.corner_radius_top_left = 4
-	style.corner_radius_top_right = 4
-	style.corner_radius_bottom_left = 4
-	style.corner_radius_bottom_right = 4
-	add_theme_stylebox_override("panel", style)
-
-	var stack := VBoxContainer.new()
-	stack.add_theme_constant_override("separation", 2)
-	add_child(stack)
-	card_container = CenterContainer.new()
-	card_container.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	stack.add_child(card_container)
-	title_label = Label.new()
-	title_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	title_label.add_theme_font_size_override("font_size", 15)
-	title_label.modulate = Color("#cfcfcf")
-	stack.add_child(title_label)
+# 这些固定节点由 zone_view.tscn 持有；脚本只绑定节点，避免运行时拼装稳定界面。
+@onready var card_container: CenterContainer = %CardContainer
+@onready var title_label: Label = %TitleLabel
 
 
 func configure(label_text: String) -> void:

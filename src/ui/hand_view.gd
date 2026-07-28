@@ -11,11 +11,6 @@ signal card_unhovered(card_data: Dictionary)
 var _selected_key := ""
 
 
-func _ready() -> void:
-	alignment = BoxContainer.ALIGNMENT_CENTER
-	add_theme_constant_override("separation", 8)
-
-
 func render_cards(cards: Array, show_backs := false) -> void:
 	for child in get_children():
 		child.queue_free()

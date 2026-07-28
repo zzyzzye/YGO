@@ -1,0 +1,8 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://src/ui/hand_view.gd" id="1_o87bq"]
+
+[node name="HandView" type="HBoxContainer" unique_id=452810778]
+theme_override_constants/separation = 8
+alignment = 1
+script = ExtResource("1_o87bq")

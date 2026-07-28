@@ -1,0 +1,45 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://src/ui/zone_view.gd" id="1_ff3w8"]
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_zone"]
+bg_color = Color(0.12549, 0.12549, 0.12549, 1)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.466667, 0.466667, 0.466667, 1)
+corner_radius_top_left = 4
+corner_radius_top_right = 4
+corner_radius_bottom_right = 4
+corner_radius_bottom_left = 4
+
+[node name="ZoneView" type="PanelContainer" unique_id=876005513]
+custom_minimum_size = Vector2(105, 132)
+theme_override_styles/panel = SubResource("StyleBoxFlat_zone")
+script = ExtResource("1_ff3w8")
+
+[node name="Stack" type="VBoxContainer" parent="." unique_id=934210341]
+layout_mode = 2
+theme_override_constants/separation = 2
+
+[node name="CardContainer" type="CenterContainer" parent="Stack" unique_id=543000434]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="TitleLabel" type="Label" parent="Stack" unique_id=1587735771]
+unique_name_in_owner = true
+modulate = Color(0.811765, 0.811765, 0.811765, 1)
+layout_mode = 2
+theme_override_font_sizes/font_size = 15
+horizontal_alignment = 1
+
+[node name="TargetHighlight" type="Panel" parent="Stack" unique_id=1731704689]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+mouse_filter = 2
+
+[node name="AnimationPlayer" type="AnimationPlayer" parent="Stack" unique_id=1336854272]
+unique_name_in_owner = true
