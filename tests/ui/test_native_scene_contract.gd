@@ -18,7 +18,7 @@ func _run() -> void:
 	var card = load(CARD_SCENE_PATH).instantiate()
 	root.add_child(card)
 	await process_frame
-	for node_name in ["SelectionFrame", "FaceDownLabel", "AnimationPlayer"]:
+	for node_name in ["SelectionFrame", "CardBackPanel", "FaceDownLabel", "AnimationPlayer"]:
 		if card.find_child(node_name, true, false) == null:
 			_fail("CardView 缺少固定节点：" + node_name)
 			return
@@ -27,6 +27,19 @@ func _run() -> void:
 		if !animator.has_animation(animation_name):
 			_fail("CardView 缺少动画：" + animation_name)
 			return
+	var card_back: Panel = card.find_child("CardBackPanel", true, false)
+	var face_down_label: Label = card.find_child("FaceDownLabel", true, false)
+	card.configure({}, true)
+	if !card_back.visible or !face_down_label.visible:
+		_fail("CardView 卡背模式必须显示原生卡背视觉和文字")
+		return
+	if face_down_label.text != "卡背":
+		_fail("CardView 卡背文字必须使用简体中文")
+		return
+	card.configure({}, false)
+	if card_back.visible or face_down_label.visible:
+		_fail("CardView 正面模式必须隐藏卡背视觉和文字")
+		return
 	card.queue_free()
 	await process_frame
 	print("Godot 原生场景契约通过")

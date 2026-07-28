@@ -58,6 +58,18 @@ mouse_default_cursor_shape = 2
 theme = ExtResource("2_theme")
 script = ExtResource("1_script")
 
+[node name="CardBackPanel" type="Panel" parent="."]
+unique_name_in_owner = true
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+theme_type_variation = &"CardBack"
+visible = false
+
 [node name="SelectionFrame" type="Panel" parent="."]
 unique_name_in_owner = true
 layout_mode = 1
@@ -79,7 +91,7 @@ anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
 mouse_filter = 2
-text = "CARD"
+text = "卡背"
 horizontal_alignment = 1
 vertical_alignment = 1
 visible = false

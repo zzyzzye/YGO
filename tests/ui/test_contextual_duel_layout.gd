@@ -1,6 +1,8 @@
 extends SceneTree
 
 const HAND_VIEW_SCRIPT = preload("res://src/ui/hand_view.gd")
+const ZONE_VIEW_SCRIPT = preload("res://src/ui/zone_view.gd")
+const CARD_SCENE_PATH := "res://src/ui/card_view.tscn"
 const DUEL_BOARD_SCRIPT = preload("res://src/duel/duel_board.gd")
 const MAIN_SCRIPT = preload("res://src/main/main.gd")
 
@@ -87,6 +89,35 @@ func _run() -> void:
 		"controller": 0,
 		"cn_name": "测试卡",
 	}
+	hand.render_cards([card], true)
+	await process_frame
+	if hand.get_child_count() != 1:
+		_fail("HandView 必须为每张手牌创建 CardView 场景实例")
+		return
+	var hand_card: CardView = hand.get_child(0)
+	if hand_card.scene_file_path != CARD_SCENE_PATH:
+		_fail("HandView 必须实例化 CardView 原生场景而非裸脚本")
+		return
+	if !hand_card.find_child("CardBackPanel", true, false).visible:
+		_fail("HandView 展示背面手牌时必须显示 CardView 卡背视觉")
+		return
+
+	var zone = ZONE_VIEW_SCRIPT.new()
+	root.add_child(zone)
+	await process_frame
+	zone.configure("测试区域")
+	zone.show_card(card, true)
+	await process_frame
+	if zone.card_container.get_child_count() != 1:
+		_fail("ZoneView 必须为区域卡牌创建 CardView 场景实例")
+		return
+	var zone_card: CardView = zone.card_container.get_child(0)
+	if zone_card.scene_file_path != CARD_SCENE_PATH:
+		_fail("ZoneView 必须实例化 CardView 原生场景而非裸脚本")
+		return
+	if !zone_card.find_child("CardBackPanel", true, false).visible:
+		_fail("ZoneView 展示背面卡牌时必须显示 CardView 卡背视觉")
+		return
 	hand.card_hovered.emit(card)
 	hand.card_unhovered.emit(card)
 	if _hovered_events.size() != 1 or _unhovered_events.size() != 1:
@@ -312,6 +343,7 @@ func _run() -> void:
 
 	main.free()
 	hand.queue_free()
+	zone.queue_free()
 	board.queue_free()
 	await process_frame
 	await process_frame

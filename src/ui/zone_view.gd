@@ -1,7 +1,8 @@
 class_name ZoneView
 extends PanelContainer
 
-const CARD_VIEW_SCRIPT = preload("res://src/ui/card_view.gd")
+# ZoneView 与 HandView 共用 CardView 原生场景，避免创建缺少固定视觉节点的裸脚本实例。
+const CARD_VIEW_SCENE = preload("res://src/ui/card_view.tscn")
 
 signal card_selected(card_data: Dictionary)
 signal card_hovered(card_data: Dictionary)
@@ -46,7 +47,7 @@ func configure(label_text: String) -> void:
 func show_card(card_data: Dictionary, show_back := false) -> void:
 	for child in card_container.get_children():
 		child.queue_free()
-	var card = CARD_VIEW_SCRIPT.new()
+	var card: CardView = CARD_VIEW_SCENE.instantiate()
 	card_container.add_child(card)
 	# CardView 在 _ready() 中建立手牌默认尺寸，因此必须在进入树后覆盖，
 	# 才能让场区卡保持紧凑并避免两行区域挤压手牌。

@@ -10,6 +10,7 @@ var face_down := false
 var selected := false
 
 @onready var selection_frame: Panel = %SelectionFrame
+@onready var card_back_panel: Panel = %CardBackPanel
 @onready var face_down_label: Label = %FaceDownLabel
 @onready var animator: AnimationPlayer = %AnimationPlayer
 
@@ -29,6 +30,8 @@ func configure(data: Dictionary, show_back := false) -> void:
 	card_data = data
 	face_down = show_back
 	texture_normal = null
+	# 卡背的底纹与文字必须同步切换；只显示文字会让透明 TextureButton 在无贴图时失去可辨识的卡牌边界。
+	card_back_panel.visible = show_back
 	face_down_label.visible = show_back
 	tooltip_text = "对手手牌" if show_back else str(data.get("cn_name", data.get("card_id", "未知卡片")))
 	if !show_back:

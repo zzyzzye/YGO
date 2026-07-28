@@ -1,4 +1,4 @@
-[gd_resource type="Theme" load_steps=7 format=3]
+[gd_resource type="Theme" load_steps=8 format=3]
 
 [sub_resource type="StyleBoxFlat" id="StyleCardSelection"]
 bg_color = Color(0, 0, 0, 0)
@@ -57,6 +57,18 @@ corner_radius_top_right = 5
 corner_radius_bottom_right = 5
 corner_radius_bottom_left = 5
 
+[sub_resource type="StyleBoxFlat" id="StyleCardBack"]
+bg_color = Color(0.07, 0.07, 0.07, 1)
+border_width_left = 5
+border_width_top = 5
+border_width_right = 5
+border_width_bottom = 5
+border_color = Color(0.18, 0.18, 0.18, 1)
+corner_radius_top_left = 4
+corner_radius_top_right = 4
+corner_radius_bottom_right = 4
+corner_radius_bottom_left = 4
+
 [resource]
 CardSelection/base_type = &"Panel"
 CardSelection/styles/panel = SubResource("StyleCardSelection")
@@ -70,3 +82,5 @@ PhaseButton/base_type = &"Button"
 PhaseButton/styles/normal = SubResource("StylePhaseButton")
 SystemButton/base_type = &"Button"
 SystemButton/styles/normal = SubResource("StyleSystemButton")
+CardBack/base_type = &"Panel"
+CardBack/styles/panel = SubResource("StyleCardBack")
