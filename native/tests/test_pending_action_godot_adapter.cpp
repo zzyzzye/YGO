@@ -28,18 +28,6 @@ void require(const bool condition, const char *message) {
 
 } // namespace
 
-namespace ygo::test_access {
-
-// 实现在独立测试翻译单元，那里在预加载 Godot/标准依赖后才局部开放私有字段。
-// 该声明仅随测试目标编译，不会进入 shipped headers 或 Godot ClassDB。
-DuelSession &install_controlled_session(YgoCoreBridge &bridge);
-void set_active(DuelSession &session);
-void set_pending_place(DuelSession &session, int player, int winner);
-const PendingAction &pending(const DuelSession &session);
-void remove_controlled_session(YgoCoreBridge &bridge);
-
-} // namespace ygo::test_access
-
 namespace {
 
 std::int64_t read_int(
@@ -304,46 +292,41 @@ void test_bridge_submits_only_current_place_option_to_real_session() {
 	bridge->destroy_duel();
 }
 
-void test_bridge_place_gates_nonlocal_and_finished_controlled_session() {
-	// Bridge 的 advance_to_local_decision 会把公开单机流程中的对手决策自动处理，
-	// 因而不能稳定停在 player=1；终局也不能通过固定牌组在短测试内可靠重现。
-	// 这里仅构造 Session 已有字段的受控快照，验证 Bridge 在调用 submit_place 前
-	// 拒绝这两种状态，且不触碰 pending。伪指针只让 is_active() 为真，两个分支
-	// 都在触达 OCGCore 前返回，离开前会清空以避免析构时释放非核心句柄。
-	godot::Ref<ygo::YgoCoreBridge> bridge;
-	bridge.instantiate();
-	require(bridge.is_valid(), "Bridge 受控区域门禁测试实例创建失败");
-	ygo::DuelSession &session = ygo::test_access::install_controlled_session(*bridge.operator->());
-	ygo::test_access::set_active(session);
-	ygo::test_access::set_pending_place(session, 1, -1);
-
-	const godot::Dictionary nonlocal = bridge->submit_place(0, LOCATION_MZONE, 3);
-	require(!static_cast<bool>(nonlocal["ok"]), "非本地待决玩家不得提交区域");
+void test_place_submission_gate_rejects_nonlocal_and_finished_pending() {
+	// 单机 Bridge 会自动处理对手决策，固定牌组也不能可靠地快速进入终局。
+	// 纯值门禁以 PendingAction 快照为唯一决策输入，故可直接验证这些安全分支，
+	// 不必篡改任何 Session/Bridge 私有状态或构造伪 OCGCore 句柄。
+	ygo::PendingAction nonlocal_pending;
+	nonlocal_pending.kind = ygo::PendingActionKind::SelectPlace;
+	nonlocal_pending.player = 1;
+	nonlocal_pending.place_options = {{0, LOCATION_MZONE, 3}};
+	const ygo::PlaceSubmissionGateResult nonlocal =
+			ygo::validate_place_submission_gate(true, -1, nonlocal_pending);
+	require(!nonlocal.ok, "非本地待决玩家不得提交区域");
 	require(
-			static_cast<godot::String>(nonlocal["message"])
-					== godot::String::utf8("当前不是本地玩家的操作回合"),
+			nonlocal.message == "当前不是本地玩家的操作回合",
 			"非本地待决玩家必须返回中文门禁错误");
 	require(
-			ygo::test_access::pending(session).kind
-					== ygo::PendingActionKind::SelectPlace
-					&& ygo::test_access::pending(session).player == 1
-					&& ygo::test_access::pending(session).place_options.size() == 1,
-			"非本地门禁拒绝后 pending 不得推进或丢失候选");
+			nonlocal_pending.kind == ygo::PendingActionKind::SelectPlace
+					&& nonlocal_pending.player == 1
+					&& nonlocal_pending.place_options.size() == 1,
+			"纯值非本地门禁不得改写输入 pending");
 
-	ygo::test_access::set_pending_place(session, 0, 0);
-	const godot::Dictionary finished = bridge->submit_place(0, LOCATION_MZONE, 3);
-	require(!static_cast<bool>(finished["ok"]), "终局决斗不得提交区域");
+	ygo::PendingAction finished_pending;
+	finished_pending.kind = ygo::PendingActionKind::SelectPlace;
+	finished_pending.player = 0;
+	finished_pending.place_options = {{0, LOCATION_MZONE, 3}};
+	const ygo::PlaceSubmissionGateResult finished =
+			ygo::validate_place_submission_gate(true, 0, finished_pending);
+	require(!finished.ok, "终局决斗不得提交区域");
 	require(
-			static_cast<godot::String>(finished["message"])
-					== godot::String::utf8("决斗已经结束，不能继续提交动作"),
+			finished.message == "决斗已经结束，不能继续提交动作",
 			"终局提交必须返回中文门禁错误");
 	require(
-			ygo::test_access::pending(session).kind
-					== ygo::PendingActionKind::SelectPlace
-					&& ygo::test_access::pending(session).player == 0
-					&& ygo::test_access::pending(session).place_options.size() == 1,
-			"终局门禁拒绝后 pending 不得推进或丢失候选");
-	ygo::test_access::remove_controlled_session(*bridge.operator->());
+			finished_pending.kind == ygo::PendingActionKind::SelectPlace
+					&& finished_pending.player == 0
+					&& finished_pending.place_options.size() == 1,
+			"纯值终局门禁不得改写输入 pending");
 }
 
 void test_chain_dictionary_contract_hides_opponent_facedown_identity() {
@@ -487,7 +470,7 @@ void run_contract_tests() {
 	test_position_selection_dictionary_contract();
 	test_place_selection_dictionary_uses_semantic_kind();
 	test_bridge_submits_only_current_place_option_to_real_session();
-	test_bridge_place_gates_nonlocal_and_finished_controlled_session();
+	test_place_submission_gate_rejects_nonlocal_and_finished_pending();
 	test_chain_dictionary_contract_hides_opponent_facedown_identity();
 	test_bridge_rejects_negative_selection_before_narrowing();
 	std::fprintf(stdout, "PendingAction Godot 适配器契约测试通过\n");

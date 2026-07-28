@@ -11,9 +11,27 @@
 
 #include <filesystem>
 #include <memory>
+#include <string>
 #include <vector>
 
 namespace ygo {
+
+// 区域选择进入 DuelSession 前的纯值门禁结果。它只描述会话快照是否允许继续，
+// 不持有决斗、Session 或 Godot 对象；因此可独立验证终局与操作者权限，同时
+// 不形成 ClassDB 接口或原始响应通道。
+struct PlaceSubmissionGateResult {
+	bool ok = false;
+	int status = -1;
+	std::string message;
+};
+
+// 根据活动状态、终局标记和当前待决快照判断本地是否可继续提交区域。参数中的
+// PendingAction 只读，候选三元组的精确匹配仍必须由 DuelSession::submit_place
+// 完成，避免 Bridge 或 Godot 伪造 OCGCore 响应。
+[[nodiscard]] PlaceSubmissionGateResult validate_place_submission_gate(
+		bool session_active,
+		int winner,
+		const PendingAction &pending_action);
 
 class YgoCoreBridge final : public godot::RefCounted {
 	GDCLASS(YgoCoreBridge, godot::RefCounted)

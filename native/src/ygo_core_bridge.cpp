@@ -80,6 +80,22 @@ godot::Dictionary process_result_to_dictionary(const ProcessResult &result) {
 
 } // namespace
 
+PlaceSubmissionGateResult validate_place_submission_gate(
+		const bool session_active,
+		const int winner,
+		const PendingAction &pending_action) {
+	if (!session_active) {
+		return {false, OCG_DUEL_STATUS_END, "决斗尚未创建"};
+	}
+	if (winner >= 0) {
+		return {false, OCG_DUEL_STATUS_END, "决斗已经结束，不能继续提交动作"};
+	}
+	if (pending_action.player != 0) {
+		return {false, OCG_DUEL_STATUS_AWAITING, "当前不是本地玩家的操作回合"};
+	}
+	return {true, OCG_DUEL_STATUS_AWAITING, ""};
+}
+
 YgoCoreBridge::YgoCoreBridge() {
 }
 
@@ -734,21 +750,17 @@ godot::Dictionary YgoCoreBridge::submit_place(
 				session_ ? session_->pending_action() : PendingAction{},
 		});
 	}
-	if (!session_ || !session_->is_active()) {
+	const bool session_active = session_ && session_->is_active();
+	const PendingAction pending_action = session_
+			? session_->pending_action()
+			: PendingAction{};
+	const PlaceSubmissionGateResult gate = validate_place_submission_gate(
+			session_active,
+			session_ ? session_->winner() : -1,
+			pending_action);
+	if (!gate.ok) {
 		return process_result_to_dictionary({
-				false, OCG_DUEL_STATUS_END, "决斗尚未创建", {}});
-	}
-	if (session_->winner() >= 0) {
-		return process_result_to_dictionary({
-				false, OCG_DUEL_STATUS_END, "决斗已经结束，不能继续提交动作",
-				session_->pending_action()});
-	}
-	// 权限取自当前决策的 player，而非请求的 controller。后者只是区域候选的
-	// 一部分，某些规则允许把卡放到另一方区域，不能被误用为操作权限判断。
-	if (session_->pending_action().player != 0) {
-		return process_result_to_dictionary({
-				false, OCG_DUEL_STATUS_AWAITING, "当前不是本地玩家的操作回合",
-				session_->pending_action()});
+				false, gate.status, gate.message, pending_action});
 	}
 	const ProcessResult result = session_->submit_place(
 			static_cast<std::uint8_t>(controller),
