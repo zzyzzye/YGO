@@ -903,6 +903,9 @@ void test_fixed_real_decks_advance_to_second_players_idle_action() {
 						&& option.sequence == 3;
 			});
 	assert(middle_monster_zone != replay_process.pending_action.place_options.end());
+	// 序号 3 必须不是候选表首项，才能捕获会话层忽略调用参数、暗中提交首项的
+	// 回归；仅断言候选存在不足以证明编码和核心实际消费的是该槽位。
+	assert(middle_monster_zone != replay_process.pending_action.place_options.begin());
 	const ygo::ProcessResult submitted_place =
 			replay.submit_place(0, LOCATION_MZONE, 3);
 	assert(submitted_place.ok);
@@ -935,8 +938,11 @@ void test_fixed_real_decks_advance_to_second_players_idle_action() {
 	assert(replay_process.ok);
 	assert(replay.query_count(0, LOCATION_HAND) == 4);
 	assert(replay.query_count(0, LOCATION_MZONE) == 1);
-	assert(replay.query_cards(0, LOCATION_MZONE).front().card_id
-			== summoned_card_id);
+	const std::vector<ygo::DuelCardSnapshot> replay_monster_zone =
+			replay.query_cards(0, LOCATION_MZONE);
+	assert(replay_monster_zone.size() == 1);
+	assert(replay_monster_zone.front().card_id == summoned_card_id);
+	assert(replay_monster_zone.front().sequence == 3);
 	replay_process = replay.submit_end_turn();
 	for (int step_index = 0;
 			step_index < 100
