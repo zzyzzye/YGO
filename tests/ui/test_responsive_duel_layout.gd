@@ -20,6 +20,7 @@ const SCENARIO_DIRECT_ATTACK := "直击 LP 与怪兽预览"
 const SCENARIO_FIVE_TARGETS := "五个合法怪兽目标"
 const SCENARIO_GENERIC_YES_NO := "通用 YesNo 确认"
 const SCENARIO_CANCELABLE_TARGETS := "可取消目标选择"
+const SCENARIO_SELECT_POSITION := "四种表示形式"
 
 var _failed := false
 
@@ -111,11 +112,17 @@ func _responsive_scenarios() -> Array[Dictionary]:
 	cancelable_targets["selection_cancelable"] = true
 	cancelable_targets["card_options"] = _five_opponent_monster_options()
 
+	var select_position := _maximum_snapshot()
+	select_position["decision_kind"] = "select_position"
+	select_position["selection_card_id"] = 89631139
+	select_position["position_options"] = [1, 2, 4, 8]
+
 	return [
 		{"name": SCENARIO_DIRECT_ATTACK, "snapshot": direct_attack},
 		{"name": SCENARIO_FIVE_TARGETS, "snapshot": five_targets},
 		{"name": SCENARIO_GENERIC_YES_NO, "snapshot": generic_yes_no},
 		{"name": SCENARIO_CANCELABLE_TARGETS, "snapshot": cancelable_targets},
+		{"name": SCENARIO_SELECT_POSITION, "snapshot": select_position},
 	]
 
 
@@ -742,6 +749,30 @@ func _assert_scenario_layout(
 			physical_size,
 			scenario_name,
 			"动作条"
+		)
+	elif scenario_name == SCENARIO_SELECT_POSITION:
+		var position_texts: Array[String] = []
+		for child in board.confirmation_buttons.get_children():
+			if child is Button:
+				position_texts.append(str(child.text))
+		if (
+			!board.confirmation_overlay.is_visible_in_tree()
+			or position_texts != [
+				"表侧攻击", "里侧攻击", "表侧守备", "里侧守备",
+			]
+			or board.action_box.is_visible_in_tree()
+			or board.direct_attack_highlight.is_visible_in_tree()
+			or _visible_target_highlight_count(board) != 0
+		):
+			_fail("表示形式必须显示四个原生按钮且无攻击残留：窗口 " + str(physical_size))
+			return
+		_assert_optional_overlay_layout(
+			board.confirmation_overlay,
+			logical_rect,
+			safe_rect,
+			physical_size,
+			scenario_name,
+			"表示形式确认层"
 		)
 
 

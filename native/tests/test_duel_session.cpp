@@ -381,6 +381,47 @@ void test_fixed_real_decks_advance_to_second_players_idle_action() {
 	}
 	const int replay_first_message = replay_process.pending_action.message_type;
 	const int replay_first_player = replay_process.pending_action.player;
+	// 使用真实 OCGCore 的通常召唤候选进入 MSG_SELECT_POSITION。Session 只
+	// 提交 C++ 已解析的离散候选，卡牌必须在核心接受后才从手牌进入怪兽区。
+	const auto normal_summon = std::find_if(
+			replay_process.pending_action.idle_actions.begin(),
+			replay_process.pending_action.idle_actions.end(),
+			[](const ygo::IdleAction &action) {
+				return action.kind == ygo::IdleActionKind::NormalSummon;
+			});
+	assert(normal_summon != replay_process.pending_action.idle_actions.end());
+	const std::uint32_t summoned_card_id = normal_summon->card_id;
+	replay_process = replay.submit_idle_action(
+			normal_summon->kind,
+			normal_summon->index);
+	for (int step_index = 0;
+			step_index < 100
+			&& replay_process.pending_action.kind == ygo::PendingActionKind::None;
+			++step_index) {
+		replay_process = replay.step();
+	}
+	assert(replay_process.ok);
+	// 当前通常怪兽只能表侧攻击召唤，OCGCore 会直接采用唯一位置而不询问；
+	// 若将来卡池规则返回多候选，则同一真实流程必须消费 SelectPosition。
+	if (replay_process.pending_action.kind
+			== ygo::PendingActionKind::SelectPosition) {
+		assert(replay_process.pending_action.selection_card_id == summoned_card_id);
+		assert(!replay_process.pending_action.position_options.empty());
+		const std::uint32_t summon_position =
+				replay_process.pending_action.position_options.front();
+		replay_process = replay.submit_position(summon_position);
+		for (int step_index = 0;
+				step_index < 100
+				&& replay_process.pending_action.kind == ygo::PendingActionKind::None;
+				++step_index) {
+			replay_process = replay.step();
+		}
+	}
+	assert(replay_process.ok);
+	assert(replay.query_count(0, LOCATION_HAND) == 4);
+	assert(replay.query_count(0, LOCATION_MZONE) == 1);
+	assert(replay.query_cards(0, LOCATION_MZONE).front().card_id
+			== summoned_card_id);
 	replay_process = replay.submit_end_turn();
 	for (int step_index = 0;
 			step_index < 100

@@ -14,6 +14,7 @@ signal attack_target_preview_requested(location: Dictionary)
 signal attack_target_requested(option_index: int)
 signal card_selection_cancel_requested
 signal yes_no_requested(accepted: bool)
+signal position_requested(position: int)
 
 var player_monster_zones: Array = []
 var player_spell_zones: Array = []
@@ -195,6 +196,11 @@ func _render_rule_decision(snapshot: Dictionary) -> void:
 		return
 	elif kind == "yes_no":
 		_open_yes_no_prompt(int(snapshot.get("decision_description", 0)))
+	elif kind == "select_position":
+		_open_position_prompt(
+			int(snapshot.get("selection_card_id", 0)),
+			snapshot.get("position_options", [])
+		)
 
 
 func _show_attack_route_choice() -> void:
@@ -251,6 +257,35 @@ func _open_yes_no_prompt(description: int) -> void:
 		button.pressed.connect(_emit_yes_no.bind(bool(option.accepted)))
 		confirmation_buttons.add_child(button)
 	confirmation_overlay.visible = true
+
+
+func _open_position_prompt(card_id: int, options: Array) -> void:
+	_rule_decision_kind = "select_position"
+	_confirmation_kind = "rule_position"
+	confirmation_label.text = "请选择卡片 %s 的表示形式" % card_id
+	_clear_confirmation_buttons()
+	# 文案映射只消费 C++ 已验证的单值候选；未知值不创建按钮，更不能由
+	# Godot 猜测位掩码组合。固定遍历输入顺序保持 OCGCore 候选顺序。
+	const POSITION_TEXT := {
+		1: "表侧攻击",
+		2: "里侧攻击",
+		4: "表侧守备",
+		8: "里侧守备",
+	}
+	for raw_position in options:
+		var selected_position := int(raw_position)
+		if !POSITION_TEXT.has(selected_position):
+			continue
+		var button := Button.new()
+		button.text = str(POSITION_TEXT[selected_position])
+		button.pressed.connect(_emit_position.bind(selected_position))
+		confirmation_buttons.add_child(button)
+	confirmation_overlay.visible = confirmation_buttons.get_child_count() > 0
+
+
+func _emit_position(selected_position: int) -> void:
+	if _rule_decision_kind == "select_position":
+		position_requested.emit(selected_position)
 
 
 func _clear_rule_decision_presentation() -> void:

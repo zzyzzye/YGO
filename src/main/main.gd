@@ -61,6 +61,7 @@ func _connect_board_signals() -> void:
 	board.attack_target_requested.connect(_on_attack_target_requested)
 	board.card_selection_cancel_requested.connect(_on_card_selection_cancel_requested)
 	board.yes_no_requested.connect(_on_yes_no_requested)
+	board.position_requested.connect(_on_position_requested)
 	board.restart_requested.connect(_on_restart_requested)
 	board.exit_requested.connect(_on_exit_requested)
 
@@ -175,7 +176,9 @@ func _refresh_board(status_text: String, pending_override: Dictionary = {}) -> v
 		# MSG_WIN 后 OCGCore 可能仍保留最后一个决策快照；终局标志必须优先
 		# 关闭本地动作，避免玩家在已经结束的决斗上继续提交阶段响应。
 		"local_player_turn": !game_over
-			and pending.get("kind", "none") in ["idle", "battle", "yes_no", "select_card"]
+			and pending.get("kind", "none") in [
+				"idle", "battle", "yes_no", "select_card", "select_position",
+			]
 			and int(pending.get("player", -1)) == 0,
 		"phase_kind": str(pending.get("kind", "none")),
 		# C++ 只公开已经校验的决策语义；Main 负责提交候选并在成功后重取快照，
@@ -186,6 +189,8 @@ func _refresh_board(status_text: String, pending_override: Dictionary = {}) -> v
 		"selection_min": int(pending.get("min_select", 0)),
 		"selection_max": int(pending.get("max_select", 0)),
 		"card_options": pending.get("card_options", []),
+		"selection_card_id": int(pending.get("selection_card_id", 0)),
+		"position_options": pending.get("position_options", []),
 		# DuelBoard 只能在 Main 已证明决策来源属于当前攻击流程时解释目标；
 		# false 的 SelectCard 仍保留在 Bridge pending 中，但不会获得攻击入口。
 		"attack_target_context_supported": _current_attack_target_context_supported,
@@ -353,6 +358,31 @@ func _on_yes_no_requested(accepted: bool) -> void:
 		return
 	_clear_attack_target_preview()
 	_submit_yes_no_response(accepted, "规则确认已提交")
+
+
+func _on_position_requested(selected_position: int) -> void:
+	if (
+		_submission_in_progress
+		or str(_current_pending_action.get("kind", "none")) != "select_position"
+		or int(_current_pending_action.get("player", -1)) != 0
+		or selected_position not in _current_pending_action.get("position_options", [])
+	):
+		return
+	_submission_in_progress = true
+	var response: Dictionary = bridge.call("submit_position", selected_position)
+	_submission_in_progress = false
+	if !bool(response.get("ok", false)):
+		board.show_status(
+			"表示形式提交失败：" + str(response.get("message", "未知错误"))
+		)
+		return
+	if bool(response.get("response_rejected", false)):
+		_refresh_board(
+			"OCGCore 拒绝了响应，请重新选择",
+			response.get("pending_action", {})
+		)
+		return
+	_refresh_board("表示形式已提交，场面已由 OCGCore 更新")
 
 
 func _submit_yes_no_response(accepted: bool, success_text: String) -> void:
