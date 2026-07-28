@@ -3,6 +3,7 @@ extends TextureButton
 
 signal card_selected(card_data: Dictionary)
 signal card_hovered(card_data: Dictionary)
+signal card_unhovered(card_data: Dictionary)
 
 var card_data: Dictionary = {}
 var face_down := false
@@ -18,6 +19,7 @@ func _ready() -> void:
 	mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
 	pressed.connect(_on_pressed)
 	mouse_entered.connect(_on_mouse_entered)
+	mouse_exited.connect(_on_mouse_exited)
 
 
 func configure(data: Dictionary, show_back := false) -> void:
@@ -64,6 +66,11 @@ func _on_pressed() -> void:
 func _on_mouse_entered() -> void:
 	if !face_down:
 		card_hovered.emit(card_data)
+
+
+func _on_mouse_exited() -> void:
+	if !face_down:
+		card_unhovered.emit(card_data)
 
 
 func _load_external_texture(resource_path: String) -> Texture2D:
