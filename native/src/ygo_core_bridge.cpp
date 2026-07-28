@@ -79,10 +79,10 @@ godot::Dictionary process_result_to_dictionary(const ProcessResult &result) {
 }
 
 ProcessResult advance_to_local_decision(DuelSession &session, ProcessResult result) {
-	// 当前单机原型固定玩家1为本地玩家。玩家2暂用最保守的确定性策略：
-	// 不发动、不召唤，遇到空闲阶段直接结束回合；若未来从其他流程进入战斗
-	// 阶段则直接结束战斗阶段。该策略只调用已经校验的会话语义接口，绝不
-	// 拼装原始响应，也不会替本地玩家跨过任何决策。
+	// 当前单机原型固定玩家1为本地玩家。玩家2使用可重放的确定性策略：
+	// 可选连锁一律跳过，强制连锁一律选择核心候选表的第一项；其余阶段不
+	// 召唤、不发动，空闲阶段结束回合、战斗阶段结束战斗。策略只调用
+	// Session 的语义接口，绝不拼装原始响应，也不会替本地玩家跨过决策。
 	constexpr int max_steps = 200;
 	for (int step_index = 0;
 			step_index < max_steps
@@ -96,6 +96,20 @@ ProcessResult advance_to_local_decision(DuelSession &session, ProcessResult resu
 		}
 		if (result.pending_action.player != 1) {
 			break;
+		}
+		if (result.pending_action.kind == PendingActionKind::SelectChain) {
+			if (result.pending_action.chain_forced) {
+				// 解析器会把“强制但空候选”归为 Malformed；仍在此处保留
+				// 防御性检查，避免策略因不完整快照访问空 vector。
+				if (result.pending_action.chain_options.empty()) {
+					break;
+				}
+				result = session.submit_chain(
+						result.pending_action.chain_options.front().index);
+			} else {
+				result = session.pass_chain();
+			}
+			continue;
 		}
 		if (result.pending_action.kind == PendingActionKind::Idle
 				&& result.pending_action.can_end_turn) {

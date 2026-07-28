@@ -125,6 +125,131 @@ void test_raw_compatibility_response_advances_pending_decision() {
 	assert(process.pending_action.player == 1);
 }
 
+void test_chain_submission_validates_snapshot_and_recovers_after_retry() {
+	const std::filesystem::path root = repository_root();
+	const auto loaded = ygo::CardDatabase::load_json_intersection(
+			root / "data/cards.json",
+			root / "images");
+	assert(loaded.ok);
+	const std::filesystem::path scripts_root = root / "third_party/CardScripts";
+	auto scripts = std::make_shared<ygo::OfficialScriptLoader>(scripts_root);
+	std::vector<std::uint32_t> deck;
+	constexpr std::uint32_t excluded_types =
+			TYPE_FUSION | TYPE_SYNCHRO | TYPE_XYZ | TYPE_LINK | TYPE_TOKEN;
+	for (const auto &[id, record] : loaded.database->records()) {
+		if ((record.rule.type & excluded_types) != 0
+				|| (record.rule.type & TYPE_NORMAL) == 0
+				|| !std::filesystem::is_regular_file(
+						scripts_root / "official" / ("c" + std::to_string(id) + ".lua"))) {
+			continue;
+		}
+		deck.push_back(id);
+	}
+	for (std::size_t index = 0; deck.size() < 40 && index < deck.size(); ++index) {
+		deck.push_back(deck[index]);
+	}
+	assert(deck.size() == 40);
+
+	ygo::DuelSession session(loaded.database, scripts);
+	assert(session.create(0x59474fULL).ok);
+	assert(session.add_deck_cards(0, deck, LOCATION_DECK).added == 40);
+	assert(session.add_deck_cards(1, deck, LOCATION_DECK).added == 40);
+	ygo::ProcessResult process = session.start();
+	for (int step_index = 0;
+			step_index < 100
+			&& process.pending_action.kind == ygo::PendingActionKind::None;
+			++step_index) {
+		process = session.step();
+	}
+	assert(process.pending_action.kind == ygo::PendingActionKind::Idle);
+	const auto monster_set = std::find_if(
+			process.pending_action.idle_actions.begin(),
+			process.pending_action.idle_actions.end(),
+			[](const ygo::IdleAction &action) {
+				return action.kind == ygo::IdleActionKind::MonsterSet;
+			});
+	assert(monster_set != process.pending_action.idle_actions.end());
+	process = session.submit_idle_action(monster_set->kind, monster_set->index);
+	for (int step_index = 0;
+			step_index < 100
+			&& process.pending_action.kind == ygo::PendingActionKind::None;
+			++step_index) {
+		process = session.step();
+	}
+	assert(process.pending_action.kind == ygo::PendingActionKind::Idle);
+
+	// 将已消耗通常召唤的真实 Idle Processor 与连锁快照错配。它会拒绝
+	// int32(0) 并发出 MSG_RETRY，从而验证 Session 保存并恢复完整连锁上下文。
+	ygo::PendingAction chain;
+	chain.kind = ygo::PendingActionKind::SelectChain;
+	chain.player = 0;
+	chain.message_type = MSG_SELECT_CHAIN;
+	chain.message = "请选择发动连锁效果";
+	chain.chain_options = {
+			{0, 100, 0, LOCATION_HAND, 1, POS_FACEUP_ATTACK, 11, 0},
+			{1, 200, 0, LOCATION_SZONE, 3, POS_FACEDOWN_DEFENSE, 22, 1},
+	};
+	session.pending_action_ = chain;
+
+	const ygo::ProcessResult invalid = session.submit_chain(99);
+	assert(!invalid.ok);
+	assert(!invalid.response_rejected);
+	assert(invalid.message == "连锁候选不属于当前 OCGCore 候选列表");
+	assert(invalid.pending_action.chain_options.size() == 2);
+	assert(session.pending_action().kind == ygo::PendingActionKind::SelectChain);
+
+	chain.chain_forced = true;
+	session.pending_action_ = chain;
+	const ygo::ProcessResult forced_pass = session.pass_chain();
+	assert(!forced_pass.ok);
+	assert(!forced_pass.response_rejected);
+	assert(forced_pass.message == "强制连锁必须发动一个候选效果");
+	assert(forced_pass.pending_action.chain_forced);
+	assert(session.pending_action().kind == ygo::PendingActionKind::SelectChain);
+
+	chain.chain_forced = false;
+	session.pending_action_ = chain;
+	const ygo::ProcessResult retry = session.submit_chain(0);
+	assert(retry.ok);
+	assert(retry.response_rejected);
+	assert(retry.pending_action.kind == ygo::PendingActionKind::SelectChain);
+	assert(retry.pending_action.player == chain.player);
+	assert(retry.pending_action.message_type == chain.message_type);
+	assert(retry.pending_action.message == chain.message);
+	assert(!retry.pending_action.chain_forced);
+	assert(retry.pending_action.chain_options.size() == 2);
+	assert(retry.pending_action.chain_options[0].index == 0);
+	assert(retry.pending_action.chain_options[0].card_id == 100);
+	assert(retry.pending_action.chain_options[0].location == LOCATION_HAND);
+	assert(retry.pending_action.chain_options[0].description == 11);
+	assert(retry.pending_action.chain_options[1].index == 1);
+	assert(retry.pending_action.chain_options[1].card_id == 200);
+	assert(retry.pending_action.chain_options[1].location == LOCATION_SZONE);
+	assert(retry.pending_action.chain_options[1].description == 22);
+
+	// Bridge 的确定性对手策略只会走这两个语义分支：可选窗口跳过，强制
+	// 窗口提交候选表第一项。两次均应被真实 Idle Processor 拒绝并完整恢复，
+	// 证明策略不会借由原始字节绕开 Session 的重试上下文。
+	const ygo::ProcessResult optional_pass_retry = session.pass_chain();
+	assert(optional_pass_retry.ok);
+	assert(optional_pass_retry.response_rejected);
+	assert(optional_pass_retry.pending_action.kind
+			== ygo::PendingActionKind::SelectChain);
+	assert(!optional_pass_retry.pending_action.chain_forced);
+	assert(optional_pass_retry.pending_action.chain_options.size() == 2);
+
+	chain.chain_forced = true;
+	session.pending_action_ = chain;
+	const ygo::ProcessResult forced_first_retry =
+			session.submit_chain(chain.chain_options.front().index);
+	assert(forced_first_retry.ok);
+	assert(forced_first_retry.response_rejected);
+	assert(forced_first_retry.pending_action.kind
+			== ygo::PendingActionKind::SelectChain);
+	assert(forced_first_retry.pending_action.chain_forced);
+	assert(forced_first_retry.pending_action.chain_options.front().index == 0);
+}
+
 void test_real_direct_attack_is_accepted() {
 	const std::filesystem::path root = repository_root();
 	const auto loaded = ygo::CardDatabase::load_json_intersection(
@@ -657,6 +782,7 @@ int main() {
 	test_real_callbacks_create_and_destroy_duel();
 	test_inactive_session_rejects_end_turn();
 	test_raw_compatibility_response_advances_pending_decision();
+	test_chain_submission_validates_snapshot_and_recovers_after_retry();
 	test_real_direct_attack_is_accepted();
 	test_fixed_real_decks_advance_to_second_players_idle_action();
 	test_full_local_assets_when_requested();

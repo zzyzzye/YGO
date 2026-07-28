@@ -90,6 +90,12 @@ public:
 	[[nodiscard]] ProcessResult submit_yes_no(bool accepted);
 	[[nodiscard]] ProcessResult submit_card_selection(std::size_t option_index);
 	[[nodiscard]] ProcessResult cancel_card_selection();
+	// 连锁选择通过解析快照中的稳定候选索引提交；Session 负责调用 Task 1 的
+	// 响应构建器、保留 MSG_RETRY 所需快照并写入 OCGCore，Godot 无需接触原始字节。
+	[[nodiscard]] ProcessResult submit_chain(std::size_t option_index);
+	// 仅非强制 MSG_SELECT_CHAIN 可跳过。强制窗口或过期快照会在写入 OCGCore
+	// 前被拒绝，并原样返回当前 PendingAction 供调用方继续展示或诊断。
+	[[nodiscard]] ProcessResult pass_chain();
 	// 表示形式只接受解析器发布的离散 OCGCore 常量；组合值和过期快照均在
 	// 写入 core 前拒绝，MSG_RETRY 时由通用恢复逻辑还原完整候选。
 	[[nodiscard]] ProcessResult submit_position(std::uint32_t position);

@@ -536,6 +536,59 @@ ProcessResult DuelSession::cancel_card_selection() {
 	return process_once();
 }
 
+ProcessResult DuelSession::submit_chain(const std::size_t option_index) {
+	if (!is_active()) {
+		return {false, OCG_DUEL_STATUS_END, "决斗尚未创建", {}};
+	}
+	const DuelResponse response =
+			build_chain_response(pending_action_, option_index);
+	if (!response.ok) {
+		return {
+				false,
+				OCG_DUEL_STATUS_AWAITING,
+				response.message,
+				pending_action_,
+		};
+	}
+
+	// 只有成功构造且仍对应当前快照的响应才可覆盖重试上下文。随后立即清空
+	// pending，防止调用方在 OCGCore 消费该响应前重复提交同一个连锁候选。
+	last_submitted_action_ = pending_action_;
+	allow_auto_select_place_ = false;
+	OCG_DuelSetResponse(
+			static_cast<OCG_Duel>(duel_),
+			response.bytes.data(),
+			static_cast<std::uint32_t>(response.bytes.size()));
+	pending_action_ = {};
+	return process_once();
+}
+
+ProcessResult DuelSession::pass_chain() {
+	if (!is_active()) {
+		return {false, OCG_DUEL_STATUS_END, "决斗尚未创建", {}};
+	}
+	const DuelResponse response = build_chain_pass_response(pending_action_);
+	if (!response.ok) {
+		return {
+				false,
+				OCG_DUEL_STATUS_AWAITING,
+				response.message,
+				pending_action_,
+		};
+	}
+
+	// 跳过同样必须通过语义构建器验证 forced 标记；这里不直接写 -1，避免
+	// 对手策略或未来调用方绕过强制连锁的协议门禁。
+	last_submitted_action_ = pending_action_;
+	allow_auto_select_place_ = false;
+	OCG_DuelSetResponse(
+			static_cast<OCG_Duel>(duel_),
+			response.bytes.data(),
+			static_cast<std::uint32_t>(response.bytes.size()));
+	pending_action_ = {};
+	return process_once();
+}
+
 ProcessResult DuelSession::submit_position(const std::uint32_t position) {
 	if (!is_active()) {
 		return {false, OCG_DUEL_STATUS_END, "决斗尚未创建", {}};
