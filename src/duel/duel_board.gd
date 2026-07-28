@@ -17,6 +17,12 @@ signal yes_no_requested(accepted: bool)
 signal position_requested(position: int, decision_generation: int)
 signal chain_requested(index: int, decision_generation: int)
 signal chain_pass_requested(decision_generation: int)
+signal place_requested(
+	controller: int,
+	location: int,
+	sequence: int,
+	decision_generation: int
+)
 
 var player_monster_zones: Array = []
 var player_spell_zones: Array = []
@@ -68,6 +74,10 @@ var _card_option_indices: Dictionary = {}
 # 当前真实 CardView 后才写入此表；空表表示整个窗口不可提交，绝不保留可映射子集。
 var _chain_options_by_location: Dictionary = {}
 var _chain_forced := false
+# key 是真实 ZoneView，value 是 C++ 已验证的区域三元组；代次由 ZoneView
+# 单独缓存并随信号返回。映射只在全部候选都落到当前空卡位后一次写入，
+# 空表表示没有任何可提交子集。
+var _place_options_by_zone: Dictionary = {}
 
 
 func _ready() -> void:
@@ -133,6 +143,13 @@ func _ready() -> void:
 	for zone in opponent_monster_zones + opponent_spell_zones:
 		zone.card_hovered.connect(_preview_card)
 		zone.card_unhovered.connect(_on_card_unhovered)
+	for zone in (
+		player_monster_zones
+		+ player_spell_zones
+		+ opponent_monster_zones
+		+ opponent_spell_zones
+	):
+		zone.place_requested.connect(_on_zone_place_requested.bind(zone))
 
 	phase_button.pressed.connect(_on_phase_pressed)
 	restart_button.pressed.connect(_request_restart)
@@ -219,6 +236,79 @@ func _render_rule_decision(snapshot: Dictionary) -> void:
 		)
 	elif kind == "select_chain":
 		_show_chain_options(snapshot)
+	elif kind == "select_place":
+		_show_place_options(snapshot)
+
+
+func _show_place_options(snapshot: Dictionary) -> void:
+	var options: Array = snapshot.get("place_options", [])
+	var mapped_options: Dictionary = {}
+	for option in options:
+		var location := _rule_location(option)
+		var zone := _find_place_candidate_zone(location)
+		if zone == null:
+			_rule_decision_kind = "select_place_unmapped"
+			show_status("区域候选无法完整映射到当前空卡位，请等待状态刷新")
+			return
+		mapped_options[zone] = location
+	if mapped_options.is_empty():
+		_rule_decision_kind = "select_place_unmapped"
+		show_status("区域候选为空，无法建立安全的放置入口")
+		return
+
+	# 只有循环完整结束后才发布字典和四组 ZoneView 高亮；任一越界、未知区域
+	# 或已占用候选都会在上面返回，因此玩家永远看不到规则集合的可映射子集。
+	_rule_decision_kind = "select_place"
+	_place_options_by_zone = mapped_options
+	for zone in _place_options_by_zone:
+		zone.set_place_candidate(true, _rule_decision_generation)
+
+
+func _find_place_candidate_zone(location: Dictionary) -> ZoneView:
+	var controller := int(location.get("controller", -1))
+	var area := int(location.get("location", -1))
+	var sequence := int(location.get("sequence", -1))
+	var zones: Array = []
+	if controller == 0 and area == 4:
+		zones = player_monster_zones
+	elif controller == 0 and area == 8:
+		zones = player_spell_zones
+	elif controller == 1 and area == 4:
+		zones = opponent_monster_zones
+	elif controller == 1 and area == 8:
+		zones = opponent_spell_zones
+	else:
+		return null
+	if sequence < 0 or sequence >= zones.size():
+		return null
+	var zone: ZoneView = zones[sequence]
+	# SelectPlace 描述放入空区域；若快照中该卡位已有 CardView，继续发布候选会
+	# 让界面与 OCGCore 场面分叉，因此整组映射必须失败。
+	if zone.card_container.get_child_count() != 0:
+		return null
+	return zone
+
+
+func _on_zone_place_requested(
+	decision_generation: int,
+	zone: ZoneView
+) -> void:
+	if (
+		_rule_decision_kind != "select_place"
+		or decision_generation != _rule_decision_generation
+		or !_place_options_by_zone.has(zone)
+	):
+		return
+	var location: Dictionary = _place_options_by_zone[zone].duplicate(true)
+	# 在向 Main 发出同步信号前退休本代全部入口。Main 返回 Retry 时会显式以
+	# preserve_decision_generation=true 重建；正常推进则由新快照增加代次。
+	_retire_place_candidates()
+	place_requested.emit(
+		int(location.controller),
+		int(location.location),
+		int(location.sequence),
+		decision_generation
+	)
 
 
 func _show_chain_options(snapshot: Dictionary) -> void:
@@ -389,6 +479,7 @@ func _clear_rule_decision_presentation(preserve_decision_generation := false) ->
 	_card_option_indices.clear()
 	_chain_options_by_location.clear()
 	_chain_forced = false
+	_retire_place_candidates()
 	direct_attack_highlight.visible = false
 	if player_hand != null:
 		player_hand.set_chain_candidate_sequences({})
@@ -405,6 +496,17 @@ func _clear_rule_decision_presentation(preserve_decision_generation := false) ->
 	_clear_dynamic_children(action_box)
 	action_box.visible = false
 	_close_confirmation()
+
+
+func _retire_place_candidates() -> void:
+	_place_options_by_zone.clear()
+	for zone in (
+		player_monster_zones
+		+ player_spell_zones
+		+ opponent_monster_zones
+		+ opponent_spell_zones
+	):
+		zone.set_place_candidate(false)
 
 
 func _find_opponent_monster_zone(location: Dictionary) -> ZoneView:

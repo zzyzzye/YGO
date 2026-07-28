@@ -19,6 +19,7 @@ var _attack_target_preview_events: Array = []
 var _attack_target_events: Array = []
 var _card_selection_cancel_events: Array = []
 var _yes_no_events: Array = []
+var _place_events: Array = []
 
 class FakeBridge:
 	extends RefCounted
@@ -347,6 +348,7 @@ func _run() -> void:
 		&"attack_target_requested",
 		&"card_selection_cancel_requested",
 		&"yes_no_requested",
+		&"place_requested",
 	]:
 		if !board.has_signal(required_signal):
 			_fail("DuelBoard 缺少规则决策信号：" + required_signal)
@@ -365,6 +367,20 @@ func _run() -> void:
 	)
 	board.yes_no_requested.connect(func(accepted: bool) -> void:
 		_yes_no_events.append(accepted)
+	)
+	board.place_requested.connect(
+		func(
+			controller: int,
+			location: int,
+			sequence: int,
+			decision_generation: int
+		) -> void:
+			_place_events.append([
+				controller,
+				location,
+				sequence,
+				decision_generation,
+			])
 	)
 	if board.find_child("LegacyActionPanel", true, false) != null:
 		_fail("情境式布局不能保留右侧永久操作列")
@@ -944,6 +960,128 @@ func _run() -> void:
 	if !_restart_events.is_empty():
 		_fail("已关闭确认层的按钮不得继续触发确认回调")
 		return
+
+	# 区域选择只消费 OCGCore 的语义三元组，四组原生 ZoneView 必须先全部映射
+	# 且确认为空，再原子发布高亮。该测试会在缺失 PlaceCandidate 与代次入口时
+	# 失败，并能捕获“先高亮可映射子集、遇到坏候选才停止”的错误实现。
+	var place_snapshot := {
+		"decision_kind": "select_place",
+		"local_player_turn": true,
+		"player_monsters": [],
+		"player_spells": [],
+		"opponent_monsters": [],
+		"opponent_spells": [],
+		"place_options": [
+			{"controller": 0, "location": 4, "sequence": 0},
+			{"controller": 0, "location": 8, "sequence": 1},
+			{"controller": 1, "location": 4, "sequence": 2},
+			{"controller": 1, "location": 8, "sequence": 3},
+		],
+	}
+	board.render_snapshot(place_snapshot)
+	var place_generation: int = board._rule_decision_generation
+	var place_candidate_zones: Array[ZoneView] = [
+		board.player_monster_zones[0],
+		board.player_spell_zones[1],
+		board.opponent_monster_zones[2],
+		board.opponent_spell_zones[3],
+	]
+	for candidate_zone in place_candidate_zones:
+		if (
+			!candidate_zone.target_highlight.visible
+			or candidate_zone.target_highlight.theme_type_variation != &"PlaceCandidate"
+		):
+			_fail("合法空卡位必须使用 PlaceCandidate 原生主题变体")
+			return
+	for non_candidate_zone in [
+		board.player_monster_zones[1],
+		board.player_spell_zones[0],
+		board.opponent_monster_zones[0],
+		board.opponent_spell_zones[0],
+	]:
+		if non_candidate_zone.target_highlight.visible:
+			_fail("非候选卡位不得显示区域选择高亮")
+			return
+
+	var place_click := InputEventMouseButton.new()
+	place_click.button_index = MOUSE_BUTTON_LEFT
+	place_click.pressed = true
+	board.player_monster_zones[1].gui_input.emit(place_click)
+	if !_place_events.is_empty():
+		_fail("非候选卡位点击不得发出区域请求")
+		return
+	board.opponent_spell_zones[3].gui_input.emit(place_click)
+	if _place_events != [[1, 8, 3, place_generation]]:
+		_fail("区域点击必须原样发出 controller/location/sequence 与当前代次")
+		return
+	for candidate_zone in place_candidate_zones:
+		if candidate_zone.target_highlight.visible:
+			_fail("第一次区域点击必须立即退休本代全部候选入口")
+			return
+	# 同帧双击和旧代次信号都只能观察到已退休入口；不能把同一规则响应发两次。
+	board.opponent_spell_zones[3].gui_input.emit(place_click)
+	board.opponent_spell_zones[3].place_requested.emit(place_generation)
+	if _place_events.size() != 1:
+		_fail("区域候选双击或退休节点不得发出第二次请求")
+		return
+
+	# MSG_RETRY 仍是同一决策代次，但必须以同一份候选重新建立原生高亮。
+	board.render_snapshot(place_snapshot, true)
+	if (
+		board._rule_decision_generation != place_generation
+		or !board.player_monster_zones[0].target_highlight.visible
+	):
+		_fail("区域选择 Retry 必须保留代次并重建全部候选")
+		return
+	board.render_snapshot(place_snapshot)
+	if board._rule_decision_generation != place_generation + 1:
+		_fail("正常新区域快照必须推进决策代次")
+		return
+	board.player_monster_zones[0].place_requested.emit(place_generation)
+	if _place_events.size() != 1:
+		_fail("上一代 ZoneView 信号不得提交当前区域决策")
+		return
+
+	var occupied_place_snapshot := place_snapshot.duplicate(true)
+	occupied_place_snapshot.player_monsters = [{
+		"card_id": 700001,
+		"location": 4,
+		"sequence": 0,
+		"cn_name": "占位测试怪兽",
+	}]
+	board.render_snapshot(occupied_place_snapshot)
+	for zone_with_occupied_candidate in place_candidate_zones:
+		if zone_with_occupied_candidate.target_highlight.visible:
+			_fail("任一候选已占用时必须原子隐藏全部区域候选")
+			return
+	var occupied_card: CardView = board.player_monster_zones[0].card_container.get_child(0)
+	occupied_card.pressed.emit()
+	if _place_events.size() != 1:
+		_fail("已占用候选卡位不得发出区域请求")
+		return
+
+	for malformed_option in [
+		{"controller": 0, "location": 4, "sequence": 5},
+		{"controller": 0, "location": 16, "sequence": 0},
+	]:
+		var malformed_place_snapshot := place_snapshot.duplicate(true)
+		malformed_place_snapshot.place_options.append(malformed_option)
+		board.render_snapshot(malformed_place_snapshot)
+		for malformed_candidate_zone in place_candidate_zones:
+			if malformed_candidate_zone.target_highlight.visible:
+				_fail("越界 sequence 或未知 location 必须原子隐藏全部候选")
+				return
+
+	board.render_snapshot(place_snapshot)
+	board.render_snapshot({
+		"decision_kind": "select_place",
+		"local_player_turn": false,
+		"place_options": place_snapshot.place_options,
+	})
+	for terminal_candidate_zone in place_candidate_zones:
+		if terminal_candidate_zone.target_highlight.visible:
+			_fail("终局或非本地快照必须清除区域候选高亮")
+			return
 
 	var main = MAIN_SCRIPT.new()
 	main.bridge = FakeBridge.new()

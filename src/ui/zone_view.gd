@@ -7,6 +7,10 @@ const CARD_VIEW_SCENE = preload("res://src/ui/card_view.tscn")
 signal card_selected(card_data: Dictionary)
 signal card_hovered(card_data: Dictionary)
 signal card_unhovered(card_data: Dictionary)
+# 空卡位没有 CardView 可转发输入，因此由 ZoneView 自己发布当前规则代次。
+# controller/location/sequence 仍由持有四组卡位语义的 DuelBoard 补齐，ZoneView
+# 不猜测自己在场景树中的协议位置。
+signal place_requested(decision_generation: int)
 
 var zone_label := ""
 var _attack_target_preview := false
@@ -14,6 +18,8 @@ var _targetable := false
 var _target_selected := false
 var _card_selected := false
 var _chain_candidate := false
+var _place_candidate := false
+var _place_decision_generation := -1
 # 这些固定节点由 zone_view.tscn 持有；脚本只绑定节点，避免运行时拼装稳定界面。
 @onready var card_container: CenterContainer = %CardContainer
 @onready var title_label: Label = %TitleLabel
@@ -24,6 +30,7 @@ func _ready() -> void:
 	# DuelBoard 会在区域加入场景树前设置标题；原生节点就绪后需回填缓存值，
 	# 才不会因 @onready 尚未绑定 Label 而丢失首帧区域名称。
 	title_label.text = zone_label
+	gui_input.connect(_on_gui_input)
 
 
 func configure(label_text: String) -> void:
@@ -60,6 +67,14 @@ func set_chain_candidate(value: bool) -> void:
 	_refresh_target_highlight()
 
 
+func set_place_candidate(value: bool, decision_generation := -1) -> void:
+	# PlaceCandidate 只允许 DuelBoard 在全量映射成功后发布。关闭时同步擦除
+	# 代次，确保 Retry 重建前的旧输入或测试保留信号无法命中新决策。
+	_place_candidate = value
+	_place_decision_generation = decision_generation if value else -1
+	_refresh_target_highlight()
+
+
 func set_card_selected(value: bool) -> void:
 	# DuelBoard 只传递展示状态，真正的规则选择仍由 OCGCore 候选动作决定。
 	_card_selected = value
@@ -90,15 +105,38 @@ func clear_card() -> void:
 
 
 func _refresh_target_highlight() -> void:
-	target_highlight.visible = _attack_target_preview or _targetable or _chain_candidate
+	target_highlight.visible = (
+		_attack_target_preview
+		or _targetable
+		or _chain_candidate
+		or _place_candidate
+	)
 	if _target_selected:
 		target_highlight.theme_type_variation = &"TargetSelectedHighlight"
 	elif _targetable:
 		target_highlight.theme_type_variation = &"TargetHighlight"
 	elif _chain_candidate:
 		target_highlight.theme_type_variation = &"ChainCandidateHighlight"
+	elif _place_candidate:
+		target_highlight.theme_type_variation = &"PlaceCandidate"
 	else:
 		target_highlight.theme_type_variation = &"AttackTargetPreview"
+
+
+func _on_gui_input(event: InputEvent) -> void:
+	if (
+		!_place_candidate
+		or !(event is InputEventMouseButton)
+		or event.button_index != MOUSE_BUTTON_LEFT
+		or !event.pressed
+		or event.double_click
+	):
+		return
+	# 先退休本节点再发信号：同步 Main/Bridge 调用或同帧双击都只能看到入口已
+	# 关闭。其余候选由 DuelBoard 在收到该信号后、向 Main 转发前原子退休。
+	var decision_generation := _place_decision_generation
+	set_place_candidate(false)
+	place_requested.emit(decision_generation)
 
 
 func _forward_card_selected(card_data: Dictionary) -> void:

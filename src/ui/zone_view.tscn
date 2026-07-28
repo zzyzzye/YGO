@@ -5,6 +5,7 @@
 
 [node name="ZoneView" type="PanelContainer" unique_id=876005513]
 custom_minimum_size = Vector2(105, 132)
+mouse_filter = 0
 theme = ExtResource("2_theme")
 theme_type_variation = &"ZonePanel"
 script = ExtResource("1_ff3w8")

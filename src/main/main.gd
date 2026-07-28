@@ -64,6 +64,7 @@ func _connect_board_signals() -> void:
 	board.position_requested.connect(_on_position_requested)
 	board.chain_requested.connect(_on_chain_requested)
 	board.chain_pass_requested.connect(_on_chain_pass_requested)
+	board.place_requested.connect(_on_place_requested)
 	board.restart_requested.connect(_on_restart_requested)
 	board.exit_requested.connect(_on_exit_requested)
 
@@ -184,7 +185,7 @@ func _refresh_board(
 		"local_player_turn": !game_over
 			and pending.get("kind", "none") in [
 				"idle", "battle", "yes_no", "select_card", "select_position",
-				"select_chain",
+				"select_chain", "select_place",
 			]
 			and int(pending.get("player", -1)) == 0,
 		"phase_kind": str(pending.get("kind", "none")),
@@ -200,6 +201,7 @@ func _refresh_board(
 		"position_options": pending.get("position_options", []),
 		"chain_forced": bool(pending.get("chain_forced", false)),
 		"chain_options": pending.get("chain_options", []),
+		"place_options": pending.get("place_options", []),
 		# DuelBoard 只能在 Main 已证明决策来源属于当前攻击流程时解释目标；
 		# false 的 SelectCard 仍保留在 Bridge pending 中，但不会获得攻击入口。
 		"attack_target_context_supported": _current_attack_target_context_supported,
@@ -408,6 +410,66 @@ func _on_chain_requested(index: int, decision_generation: int) -> void:
 	):
 		return
 	_submit_chain_response("submit_chain", index)
+
+
+func _on_place_requested(
+	controller: int,
+	location: int,
+	sequence: int,
+	decision_generation: int
+) -> void:
+	if (
+		_submission_in_progress
+		or decision_generation != board._rule_decision_generation
+		or board._rule_decision_kind != "select_place"
+		or !_current_place_has_option(controller, location, sequence)
+	):
+		return
+	# 锁在调用同步 GDExtension 前建立，防止双击或 Bridge 回调重入。DuelBoard
+	# 已退休当前可视入口；失败/Retry 必须重绘同一 pending 才能再次选择。
+	_submission_in_progress = true
+	var response: Dictionary = bridge.call(
+		"submit_place",
+		controller,
+		location,
+		sequence
+	)
+	_submission_in_progress = false
+	if !bool(response.get("ok", false)):
+		_refresh_board(
+			"区域提交失败：" + str(response.get("message", "未知错误")),
+			_current_pending_action,
+			true
+		)
+		return
+	if bool(response.get("response_rejected", false)):
+		_refresh_board(
+			"OCGCore 拒绝了响应，请重新选择",
+			response.get("pending_action", {}),
+			true
+		)
+		return
+	_refresh_board("放置区域已提交，场面已由 OCGCore 更新")
+
+
+func _current_place_has_option(
+	controller: int,
+	location: int,
+	sequence: int
+) -> bool:
+	if (
+		str(_current_pending_action.get("kind", "none")) != "select_place"
+		or int(_current_pending_action.get("player", -1)) != 0
+	):
+		return false
+	for option in _current_pending_action.get("place_options", []):
+		if (
+			int(option.get("controller", -1)) == controller
+			and int(option.get("location", -1)) == location
+			and int(option.get("sequence", -1)) == sequence
+		):
+			return true
+	return false
 
 
 func _on_chain_pass_requested(decision_generation: int) -> void:
