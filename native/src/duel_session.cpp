@@ -536,6 +536,31 @@ ProcessResult DuelSession::cancel_card_selection() {
 	return process_once();
 }
 
+ProcessResult DuelSession::submit_position(const std::uint32_t position) {
+	if (!is_active()) {
+		return {false, OCG_DUEL_STATUS_END, "决斗尚未创建", {}};
+	}
+	const DuelResponse response =
+			build_position_response(pending_action_, position);
+	if (!response.ok) {
+		return {
+				false,
+				OCG_DUEL_STATUS_AWAITING,
+				response.message,
+				pending_action_,
+		};
+	}
+
+	last_submitted_action_ = pending_action_;
+	allow_auto_select_place_ = false;
+	OCG_DuelSetResponse(
+			static_cast<OCG_Duel>(duel_),
+			response.bytes.data(),
+			static_cast<std::uint32_t>(response.bytes.size()));
+	pending_action_ = {};
+	return process_once();
+}
+
 ProcessResult DuelSession::submit_enter_main2() {
 	if (!is_active()) {
 		return {false, OCG_DUEL_STATUS_END, "决斗尚未创建", {}};

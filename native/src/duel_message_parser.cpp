@@ -382,6 +382,64 @@ ygo::PendingAction parse_select_card_message(
 	return pending;
 }
 
+ygo::PendingAction parse_select_position_message(
+		const std::uint8_t *data,
+		const std::size_t size) {
+	ByteReader reader(data, size);
+	std::uint8_t message_type = 0;
+	std::uint8_t player = 0;
+	std::uint32_t card_id = 0;
+	std::uint8_t position_mask = 0;
+	if (!reader.read_u8(message_type)
+			|| !reader.read_u8(player)
+			|| !reader.read_u32(card_id)
+			|| !reader.read_u8(position_mask)
+			|| reader.remaining() != 0) {
+		return {
+				ygo::PendingActionKind::Malformed,
+				-1,
+				false,
+				MSG_SELECT_POSITION,
+				"表示形式选择消息长度不是固定的 7 字节",
+		};
+	}
+	constexpr std::uint8_t legal_mask =
+			POS_FACEUP_ATTACK | POS_FACEDOWN_ATTACK
+			| POS_FACEUP_DEFENSE | POS_FACEDOWN_DEFENSE;
+	if (player > 1 || position_mask == 0
+			|| (position_mask & static_cast<std::uint8_t>(~legal_mask)) != 0) {
+		return {
+				ygo::PendingActionKind::Malformed,
+				-1,
+				false,
+				MSG_SELECT_POSITION,
+				"表示形式选择消息包含非法玩家或位置掩码",
+		};
+	}
+
+	ygo::PendingAction pending{
+			ygo::PendingActionKind::SelectPosition,
+			static_cast<int>(player),
+			false,
+			MSG_SELECT_POSITION,
+			"等待玩家选择表示形式",
+	};
+	pending.selection_card_id = card_id;
+	// 固定顺序是 C++/Godot 的稳定显示契约；只发布核心掩码中真实存在的
+	// 单值候选，禁止界面补全或提交组合值。
+	for (const std::uint32_t position : {
+				POS_FACEUP_ATTACK,
+				POS_FACEDOWN_ATTACK,
+				POS_FACEUP_DEFENSE,
+				POS_FACEDOWN_DEFENSE,
+			}) {
+		if ((position_mask & position) != 0) {
+			pending.position_options.push_back(position);
+		}
+	}
+	return pending;
+}
+
 ygo::PendingAction parse_chain_message(
 		const std::uint8_t *data,
 		const std::size_t size) {
@@ -608,6 +666,8 @@ PendingAction parse_pending_action(
 			pending = parse_yes_no_message(frame, frame_size);
 		} else if (frame[0] == MSG_SELECT_CARD) {
 			pending = parse_select_card_message(frame, frame_size);
+		} else if (frame[0] == MSG_SELECT_POSITION) {
+			pending = parse_select_position_message(frame, frame_size);
 		} else if (frame[0] == MSG_SELECT_CHAIN) {
 			pending = parse_chain_message(frame, frame_size);
 		} else if (frame[0] == MSG_SELECT_PLACE) {

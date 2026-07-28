@@ -195,6 +195,60 @@ void test_yes_no_rejects_trailing_bytes_without_publishing_description() {
 			== "是/否选择消息含有尾随字节，无法安全解析");
 }
 
+void test_select_position_exposes_only_core_candidates() {
+	std::vector<std::uint8_t> select{MSG_SELECT_POSITION, 0};
+	append_little_endian<std::uint32_t>(select, 89631139);
+	select.push_back(
+			POS_FACEUP_ATTACK | POS_FACEDOWN_ATTACK
+			| POS_FACEUP_DEFENSE | POS_FACEDOWN_DEFENSE);
+	const std::vector<std::uint8_t> stream = framed(select);
+
+	const ygo::PendingAction pending =
+			ygo::parse_pending_action(stream.data(), stream.size());
+	assert(pending.kind == ygo::PendingActionKind::SelectPosition);
+	assert(pending.player == 0);
+	assert(pending.selection_card_id == 89631139);
+	assert(pending.position_options == std::vector<std::uint32_t>({
+			POS_FACEUP_ATTACK,
+			POS_FACEDOWN_ATTACK,
+			POS_FACEUP_DEFENSE,
+			POS_FACEDOWN_DEFENSE,
+	}));
+}
+
+void test_select_position_rejects_invalid_or_malformed_frames() {
+	const auto assert_malformed = [](std::vector<std::uint8_t> message) {
+		const std::vector<std::uint8_t> stream = framed(message);
+		const ygo::PendingAction pending =
+				ygo::parse_pending_action(stream.data(), stream.size());
+		assert(pending.kind == ygo::PendingActionKind::Malformed);
+		assert(pending.position_options.empty());
+		assert(pending.selection_card_id == 0);
+	};
+
+	std::vector<std::uint8_t> invalid_player{MSG_SELECT_POSITION, 2};
+	append_little_endian<std::uint32_t>(invalid_player, 89631139);
+	invalid_player.push_back(POS_FACEUP_ATTACK);
+	assert_malformed(invalid_player);
+
+	std::vector<std::uint8_t> empty_mask{MSG_SELECT_POSITION, 0};
+	append_little_endian<std::uint32_t>(empty_mask, 89631139);
+	empty_mask.push_back(0);
+	assert_malformed(empty_mask);
+
+	std::vector<std::uint8_t> invalid_mask{MSG_SELECT_POSITION, 0};
+	append_little_endian<std::uint32_t>(invalid_mask, 89631139);
+	invalid_mask.push_back(0x10);
+	assert_malformed(invalid_mask);
+
+	assert_malformed({MSG_SELECT_POSITION, 0, 1, 2, 3, 4});
+
+	std::vector<std::uint8_t> trailing{MSG_SELECT_POSITION, 0};
+	append_little_endian<std::uint32_t>(trailing, 89631139);
+	trailing.insert(trailing.end(), {POS_FACEUP_ATTACK, 0xff});
+	assert_malformed(trailing);
+}
+
 void test_select_card_exposes_single_card_candidates() {
 	std::vector<std::uint8_t> select{MSG_SELECT_CARD, 0, 1};
 	append_little_endian<std::uint32_t>(select, 1);
@@ -517,6 +571,8 @@ int main() {
 	test_yes_no_message_exposes_player_and_description();
 	test_yes_no_rejects_invalid_player_and_truncated_description();
 	test_yes_no_rejects_trailing_bytes_without_publishing_description();
+	test_select_position_exposes_only_core_candidates();
+	test_select_position_rejects_invalid_or_malformed_frames();
 	test_select_card_exposes_single_card_candidates();
 	test_select_card_rejects_invalid_protocol_fields_without_candidates();
 	test_select_card_rejects_impossible_candidate_count_before_allocation();

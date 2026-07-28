@@ -78,4 +78,31 @@ DuelResponse build_card_selection_cancel_response(
 	return {true, "", {0xff, 0xff, 0xff, 0xff}};
 }
 
+DuelResponse build_position_response(
+		const PendingAction &pending_action,
+		const std::uint32_t position) {
+	if (pending_action.kind != PendingActionKind::SelectPosition) {
+		return {false, "当前不是表示形式选择", {}};
+	}
+	const auto candidate = std::find(
+			pending_action.position_options.begin(),
+			pending_action.position_options.end(),
+			position);
+	if (candidate == pending_action.position_options.end()) {
+		return {false, "表示形式不属于当前 OCGCore 候选列表", {}};
+	}
+	// MSG_SELECT_POSITION 接受位置常量的 int32 小端值。候选已由解析器拆成
+	// 单值，这里仍逐字节编码，避免宿主端字节序进入协议边界。
+	return {
+		true,
+		"",
+		{
+			static_cast<std::uint8_t>(position & 0xffU),
+			static_cast<std::uint8_t>((position >> 8U) & 0xffU),
+			static_cast<std::uint8_t>((position >> 16U) & 0xffU),
+			static_cast<std::uint8_t>((position >> 24U) & 0xffU),
+		},
+	};
+}
+
 } // namespace ygo

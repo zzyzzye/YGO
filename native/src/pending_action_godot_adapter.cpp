@@ -54,6 +54,8 @@ const char *pending_action_kind_name(const PendingActionKind kind) {
 		return "yes_no";
 	case PendingActionKind::SelectCard:
 		return "select_card";
+	case PendingActionKind::SelectPosition:
+		return "select_position";
 	case PendingActionKind::AutoPassChain:
 		return "auto_pass_chain";
 	case PendingActionKind::AutoSelectPlace:
@@ -134,6 +136,13 @@ godot::Dictionary pending_action_to_dictionary(const PendingAction &pending) {
 		card_options.push_back(item);
 	}
 	response["card_options"] = card_options;
+	response["selection_card_id"] =
+			static_cast<std::int64_t>(pending.selection_card_id);
+	godot::Array position_options;
+	for (const std::uint32_t position : pending.position_options) {
+		position_options.push_back(static_cast<std::int64_t>(position));
+	}
+	response["position_options"] = position_options;
 	return response;
 }
 

@@ -27,5 +27,8 @@ struct DuelResponse {
 		std::size_t option_index);
 [[nodiscard]] DuelResponse build_card_selection_cancel_response(
 		const PendingAction &pending_action);
+[[nodiscard]] DuelResponse build_position_response(
+		const PendingAction &pending_action,
+		std::uint32_t position);
 
 } // namespace ygo

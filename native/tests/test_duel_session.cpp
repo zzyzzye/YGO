@@ -78,6 +78,7 @@ void test_inactive_session_rejects_end_turn() {
 	assert(result.message == "决斗尚未创建");
 	assert(!session.submit_enter_battle().ok);
 	assert(!session.submit_enter_main2().ok);
+	assert(!session.submit_position(POS_FACEUP_ATTACK).ok);
 	assert(!session.submit_end_battle().ok);
 	assert(!session.submit_battle_action(ygo::BattleActionKind::Attack, 0).ok);
 }
@@ -460,6 +461,38 @@ void test_fixed_real_decks_advance_to_second_players_idle_action() {
 	assert(stale.message == "卡牌候选不属于当前 OCGCore 候选列表");
 	assert(stale.pending_action.kind == ygo::PendingActionKind::SelectCard);
 	assert(stale.pending_action.card_options.size() == 2);
+
+	// 同样把一个 SelectPosition 快照提交给仍等待 Idle 的真实 Processor，
+	// 验证 MSG_RETRY 会完整恢复卡号与离散候选，而不是只恢复 kind。
+	ygo::PendingAction submitted_position;
+	submitted_position.kind = ygo::PendingActionKind::SelectPosition;
+	submitted_position.player = 0;
+	submitted_position.message_type = MSG_SELECT_POSITION;
+	submitted_position.message = "请选择表示形式";
+	submitted_position.selection_card_id = 89631139;
+	submitted_position.position_options = {
+		POS_FACEUP_ATTACK,
+		POS_FACEDOWN_DEFENSE,
+	};
+	replay.last_submitted_action_ = {};
+	replay.pending_action_ = submitted_position;
+	const ygo::ProcessResult position_retry =
+			replay.submit_position(POS_FACEUP_ATTACK);
+	assert(position_retry.response_rejected);
+	assert(position_retry.pending_action.kind
+			== ygo::PendingActionKind::SelectPosition);
+	assert(position_retry.pending_action.selection_card_id == 89631139);
+	assert(position_retry.pending_action.position_options
+			== submitted_position.position_options);
+
+	const ygo::ProcessResult invalid_position =
+			replay.submit_position(POS_FACEUP_DEFENSE);
+	assert(!invalid_position.ok);
+	assert(!invalid_position.response_rejected);
+	assert(invalid_position.message
+			== "表示形式不属于当前 OCGCore 候选列表");
+	assert(invalid_position.pending_action.position_options
+			== submitted_position.position_options);
 }
 
 void test_full_local_assets_when_requested() {

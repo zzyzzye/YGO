@@ -13,6 +13,7 @@ enum class PendingActionKind {
 	Battle,
 	YesNo,
 	SelectCard,
+	SelectPosition,
 	AutoPassChain,
 	AutoSelectPlace,
 	Retry,
@@ -119,6 +120,10 @@ struct PendingAction {
 	std::uint32_t min_select = 0;
 	std::uint32_t max_select = 0;
 	std::vector<CardSelectionOption> card_options;
+	// MSG_SELECT_POSITION 的 card_id 用于说明正在选择表示形式的规则卡牌；
+	// position_options 已将核心位掩码拆成合法单值，Godot 不得自行解释掩码。
+	std::uint32_t selection_card_id = 0;
+	std::vector<std::uint32_t> position_options;
 };
 
 // 解析 OCGCore_DuelGetMessage 返回的完整缓冲区。缓冲区由若干

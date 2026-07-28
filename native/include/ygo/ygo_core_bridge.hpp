@@ -64,6 +64,7 @@ public:
 	godot::Dictionary submit_yes_no(bool accepted);
 	godot::Dictionary submit_card_selection(std::int64_t index);
 	godot::Dictionary cancel_card_selection();
+	godot::Dictionary submit_position(std::int64_t position);
 	// 返回当前双方场上状态计数（卡组/手牌/怪兽区/魔陷区/墓地/除外区）。
 	godot::Dictionary get_duel_state() const;
 	void destroy_duel();

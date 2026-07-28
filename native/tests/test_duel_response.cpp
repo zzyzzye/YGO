@@ -1,4 +1,5 @@
 #include "ygo/duel_response.hpp"
+#include "ocgapi_constants.h"
 
 #include <cassert>
 #include <cstdint>
@@ -32,6 +33,39 @@ void test_yes_no_response_encodes_boolean_as_little_endian_int32() {
 	assert(accepted.bytes == std::vector<std::uint8_t>({1, 0, 0, 0}));
 	assert(declined.ok);
 	assert(declined.bytes == std::vector<std::uint8_t>({0, 0, 0, 0}));
+}
+
+void test_position_response_requires_current_discrete_candidate() {
+	ygo::PendingAction pending;
+	pending.kind = ygo::PendingActionKind::YesNo;
+	const ygo::DuelResponse wrong_kind =
+			ygo::build_position_response(pending, POS_FACEUP_ATTACK);
+	assert(!wrong_kind.ok);
+	assert(wrong_kind.message == "当前不是表示形式选择");
+	assert(wrong_kind.bytes.empty());
+
+	pending.kind = ygo::PendingActionKind::SelectPosition;
+	pending.position_options = {POS_FACEUP_ATTACK, POS_FACEDOWN_DEFENSE};
+	const ygo::DuelResponse combination = ygo::build_position_response(
+			pending, POS_FACEUP_ATTACK | POS_FACEDOWN_DEFENSE);
+	assert(!combination.ok);
+	assert(combination.message == "表示形式不属于当前 OCGCore 候选列表");
+
+	const ygo::DuelResponse unknown =
+			ygo::build_position_response(pending, POS_FACEUP_DEFENSE);
+	assert(!unknown.ok);
+	assert(unknown.bytes.empty());
+}
+
+void test_position_response_encodes_little_endian_int32() {
+	ygo::PendingAction pending;
+	pending.kind = ygo::PendingActionKind::SelectPosition;
+	pending.position_options = {POS_FACEDOWN_DEFENSE};
+
+	const ygo::DuelResponse response =
+			ygo::build_position_response(pending, POS_FACEDOWN_DEFENSE);
+	assert(response.ok);
+	assert(response.bytes == std::vector<std::uint8_t>({8, 0, 0, 0}));
 }
 
 void test_card_selection_response_rejects_wrong_kind_and_unknown_candidate() {
@@ -159,6 +193,8 @@ void test_card_selection_cancel_encodes_negative_one_as_little_endian_int32() {
 int main() {
 	test_yes_no_response_rejects_wrong_action_kind();
 	test_yes_no_response_encodes_boolean_as_little_endian_int32();
+	test_position_response_requires_current_discrete_candidate();
+	test_position_response_encodes_little_endian_int32();
 	test_card_selection_response_rejects_wrong_kind_and_unknown_candidate();
 	test_card_selection_response_rejects_index_outside_uint32_protocol();
 	test_card_selection_response_rejects_non_single_selection_constraints();

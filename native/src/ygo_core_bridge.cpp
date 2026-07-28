@@ -672,6 +672,38 @@ godot::Dictionary YgoCoreBridge::cancel_card_selection() {
 			: process_result_to_dictionary(result);
 }
 
+godot::Dictionary YgoCoreBridge::submit_position(const std::int64_t position) {
+	if (position < 0
+			|| static_cast<std::uint64_t>(position)
+					> std::numeric_limits<std::uint32_t>::max()) {
+		return process_result_to_dictionary({
+				false,
+				OCG_DUEL_STATUS_AWAITING,
+				"表示形式超出 OCGCore 协议范围",
+				session_ ? session_->pending_action() : PendingAction{},
+		});
+	}
+	if (!session_ || !session_->is_active()) {
+		return process_result_to_dictionary({
+				false, OCG_DUEL_STATUS_END, "决斗尚未创建", {}});
+	}
+	if (session_->winner() >= 0) {
+		return process_result_to_dictionary({
+				false, OCG_DUEL_STATUS_END, "决斗已经结束，不能继续提交动作",
+				session_->pending_action()});
+	}
+	if (session_->pending_action().player != 0) {
+		return process_result_to_dictionary({
+				false, OCG_DUEL_STATUS_AWAITING, "当前不是本地玩家的操作回合",
+				session_->pending_action()});
+	}
+	const ProcessResult result =
+			session_->submit_position(static_cast<std::uint32_t>(position));
+	return result.ok
+			? process_result_to_dictionary(advance_to_local_decision(*session_, result))
+			: process_result_to_dictionary(result);
+}
+
 godot::Dictionary YgoCoreBridge::get_duel_state() const {
 	godot::Dictionary response;
 	if (!session_ || !session_->is_active()) {
@@ -792,6 +824,9 @@ void YgoCoreBridge::_bind_methods() {
 	godot::ClassDB::bind_method(
 			godot::D_METHOD("cancel_card_selection"),
 			&YgoCoreBridge::cancel_card_selection);
+	godot::ClassDB::bind_method(
+			godot::D_METHOD("submit_position", "position"),
+			&YgoCoreBridge::submit_position);
 	godot::ClassDB::bind_method(
 			godot::D_METHOD("get_duel_state"),
 			&YgoCoreBridge::get_duel_state);

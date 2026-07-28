@@ -90,6 +90,9 @@ public:
 	[[nodiscard]] ProcessResult submit_yes_no(bool accepted);
 	[[nodiscard]] ProcessResult submit_card_selection(std::size_t option_index);
 	[[nodiscard]] ProcessResult cancel_card_selection();
+	// 表示形式只接受解析器发布的离散 OCGCore 常量；组合值和过期快照均在
+	// 写入 core 前拒绝，MSG_RETRY 时由通用恢复逻辑还原完整候选。
+	[[nodiscard]] ProcessResult submit_position(std::uint32_t position);
 	// 分别对应 MSG_SELECT_BATTLECMD 的 type=2（主要阶段二）和 type=3（结束）。
 	[[nodiscard]] ProcessResult submit_enter_main2();
 	[[nodiscard]] ProcessResult submit_end_battle();

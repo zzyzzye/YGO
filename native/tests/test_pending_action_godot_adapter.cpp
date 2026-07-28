@@ -100,6 +100,33 @@ void test_card_selection_hides_opponent_facedown_identity() {
 			"对手正面候选应携带真实卡号");
 }
 
+void test_position_selection_dictionary_contract() {
+	ygo::PendingAction pending;
+	pending.kind = ygo::PendingActionKind::SelectPosition;
+	pending.player = 0;
+	pending.selection_card_id = 89631139;
+	pending.position_options = {
+		POS_FACEUP_ATTACK,
+		POS_FACEDOWN_DEFENSE,
+	};
+
+	const godot::Dictionary converted =
+			ygo::pending_action_to_dictionary(pending);
+	require(
+			static_cast<godot::String>(converted["kind"])
+					== godot::String("select_position"),
+			"表示形式决策必须使用 select_position kind");
+	require(
+			read_int(converted, "selection_card_id") == 89631139,
+			"表示形式决策必须透传规则卡号");
+	const godot::Array options = converted["position_options"];
+	require(options.size() == 2, "表示形式候选数量必须保持不变");
+	require(
+			static_cast<std::int64_t>(options[0]) == POS_FACEUP_ATTACK
+					&& static_cast<std::int64_t>(options[1]) == POS_FACEDOWN_DEFENSE,
+			"表示形式离散候选不得重排或组合");
+}
+
 void test_bridge_rejects_negative_selection_before_narrowing() {
 	godot::Ref<ygo::YgoCoreBridge> bridge;
 	bridge.instantiate();
@@ -110,6 +137,9 @@ void test_bridge_rejects_negative_selection_before_narrowing() {
 	require(
 			bridge->has_method(godot::StringName("submit_card_selection")),
 			"submit_card_selection 必须绑定到 Godot");
+	require(
+			bridge->has_method(godot::StringName("submit_position")),
+			"submit_position 必须绑定到 Godot");
 	require(
 			bridge->has_method(godot::StringName("cancel_card_selection")),
 			"cancel_card_selection 必须绑定到 Godot");
@@ -125,6 +155,7 @@ void test_bridge_rejects_negative_selection_before_narrowing() {
 void run_contract_tests() {
 	test_yes_no_dictionary_contract();
 	test_card_selection_hides_opponent_facedown_identity();
+	test_position_selection_dictionary_contract();
 	test_bridge_rejects_negative_selection_before_narrowing();
 	std::fprintf(stdout, "PendingAction Godot 适配器契约测试通过\n");
 }
