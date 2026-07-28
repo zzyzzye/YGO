@@ -29,13 +29,13 @@ func _ready() -> void:
 func _start_duel(duel_seed: int) -> void:
 	var source_ids: PackedInt64Array = bridge.call("get_scripted_card_ids")
 	if source_ids.size() < STARTING_DECK_SIZE:
-		board.status_label.text = "可用演示卡不足 40 张，无法建局"
+		board.show_status("可用演示卡不足 40 张，无法建局")
 		return
 	var deck1 := _build_deck_ids(source_ids, duel_seed)
 	var deck2 := _build_deck_ids(source_ids, duel_seed ^ 0x123456)
 	var setup: Dictionary = bridge.call("setup_duel", deck1, deck2, duel_seed)
 	if !setup.ok:
-		board.status_label.text = "建局失败：" + str(setup.message)
+		board.show_status("建局失败：" + str(setup.message))
 		return
 	_refresh_board("黑白功能场已连接真实 OCGCore")
 
@@ -59,7 +59,7 @@ func _refresh_board(status_text: String) -> void:
 	var state: Dictionary = bridge.call("get_duel_state")
 	var pending: Dictionary = bridge.call("get_pending_action")
 	if !state.ok:
-		board.status_label.text = "读取决斗状态失败：" + str(state.message)
+		board.show_status("读取决斗状态失败：" + str(state.message))
 		return
 
 	var actions: Array = pending.idle_actions if int(pending.player) == 0 else []
@@ -78,6 +78,11 @@ func _refresh_board(status_text: String) -> void:
 		"opponent_stats": "LP 8000　卡组 %s　额外 %s　墓地 %s　除外 %s" % [
 			opponent_state.deck, opponent_state.extra, opponent_state.graveyard, opponent_state.banished,
 		],
+		# 阶段球只消费明确布尔能力，不解析“玩家1 · 主阶段”等用户可见文本。
+		"local_player_turn": pending.kind == "idle" and int(pending.player) == 0,
+		"can_end_turn": pending.kind == "idle"
+			and int(pending.player) == 0
+			and bool(pending.can_end_turn),
 		"idle_actions": actions,
 		"turn_text": "玩家%s · 主阶段" % [int(pending.player) + 1] if pending.kind == "idle" else "规则处理中",
 		"status_text": status_text,
@@ -99,7 +104,7 @@ func _on_idle_action_requested(
 ) -> void:
 	var response: Dictionary = bridge.call("submit_idle_action", action_kind, index)
 	if !response.ok:
-		board.status_label.text = "动作失败：" + str(response.message)
+		board.show_status("动作失败：" + str(response.message))
 		return
 	board._clear_selection()
 	_refresh_board("%s成功，场面已由 OCGCore 更新" % _action_text(action_kind))
@@ -108,7 +113,7 @@ func _on_idle_action_requested(
 func _on_end_turn_requested() -> void:
 	var response: Dictionary = bridge.call("submit_end_turn")
 	if !response.ok:
-		board.status_label.text = "结束回合失败：" + str(response.message)
+		board.show_status("结束回合失败：" + str(response.message))
 		return
 	_refresh_board("玩家1回合结束，玩家2已抽牌")
 

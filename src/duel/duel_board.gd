@@ -30,6 +30,7 @@ var opponent_stats_label: Label
 var confirmation_overlay: PanelContainer
 var confirmation_label: Label
 var selected_card: Dictionary = {}
+var _hovered_card: Dictionary = {}
 var current_actions: Array = []
 var _confirmation_kind := ""
 var _local_player_turn := false
@@ -183,9 +184,9 @@ func _build_context_action_bar() -> void:
 	action_box.visible = false
 	action_box.z_index = 12
 	action_box.anchor_left = 0.33
-	action_box.anchor_top = 0.79
+	action_box.anchor_top = 0.64
 	action_box.anchor_right = 0.67
-	action_box.anchor_bottom = 0.845
+	action_box.anchor_bottom = 0.69
 	action_box.alignment = BoxContainer.ALIGNMENT_CENTER
 	action_box.add_theme_constant_override("separation", 10)
 	add_child(action_box)
@@ -245,9 +246,9 @@ func _build_status_toast() -> void:
 	status_label = Label.new()
 	status_label.name = "StatusToast"
 	status_label.z_index = 14
-	status_label.anchor_left = 0.35
+	status_label.anchor_left = 0.015
 	status_label.anchor_top = 0.025
-	status_label.anchor_right = 0.65
+	status_label.anchor_right = 0.175
 	status_label.anchor_bottom = 0.075
 	status_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	status_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
@@ -344,7 +345,7 @@ func _render_zone_cards(zones: Array, cards: Array) -> void:
 
 func _on_card_selected(card_data: Dictionary) -> void:
 	if card_data.is_empty():
-		_clear_selection()
+		_unlock_selection()
 		return
 	selected_card = card_data
 	_show_card_detail(card_data)
@@ -352,10 +353,13 @@ func _on_card_selected(card_data: Dictionary) -> void:
 
 
 func _preview_card(card_data: Dictionary) -> void:
+	_hovered_card = card_data
 	_show_card_detail(card_data)
 
 
-func _on_card_unhovered(_card_data: Dictionary) -> void:
+func _on_card_unhovered(card_data: Dictionary) -> void:
+	if _same_card(_hovered_card, card_data):
+		_hovered_card = {}
 	if selected_card.is_empty():
 		_hide_card_detail()
 	else:
@@ -430,12 +434,36 @@ func _action_label(kind: String) -> String:
 
 func _clear_selection() -> void:
 	selected_card = {}
+	_hovered_card = {}
 	if player_hand != null:
 		player_hand.clear_selection()
 	for child in action_box.get_children():
 		child.queue_free()
 	action_box.visible = false
 	_hide_card_detail()
+
+
+func _unlock_selection() -> void:
+	# 重复点击只解除“锁定”，不能伪造一次鼠标离开。若指针仍停在该卡上，
+	# 详情应退回临时预览状态，直到真实的 card_unhovered 事件到来。
+	selected_card = {}
+	if player_hand != null:
+		player_hand.clear_selection()
+	for child in action_box.get_children():
+		child.queue_free()
+	action_box.visible = false
+	if _hovered_card.is_empty():
+		_hide_card_detail()
+	else:
+		_show_card_detail(_hovered_card)
+
+
+func _same_card(left: Dictionary, right: Dictionary) -> bool:
+	return (
+		int(left.get("card_id", -1)) == int(right.get("card_id", -2))
+		and int(left.get("sequence", -1)) == int(right.get("sequence", -2))
+		and int(left.get("location", -1)) == int(right.get("location", -2))
+	)
 
 
 func _on_phase_pressed() -> void:
@@ -482,6 +510,24 @@ func _on_background_input(event: InputEvent) -> void:
 	if event is InputEventMouseButton and event.pressed:
 		_clear_selection()
 		_close_confirmation()
+
+
+func _input(event: InputEvent) -> void:
+	if event is InputEventMouseButton and event.pressed:
+		_handle_surface_click(get_viewport().gui_get_hovered_control())
+
+
+func _handle_surface_click(target: Control) -> void:
+	# GUI 输入会先命中战场中的容器和区域节点，不能依赖位于最底层的背景
+	# 收到事件。这里从视口取得实际命中控件：按钮和浮层内部保留其语义，
+	# 其余表面统一视作“场地空白”，用于解除选择和关闭确认。
+	if target is BaseButton:
+		return
+	for overlay in [detail_overlay, confirmation_overlay, debug_overlay, action_box]:
+		if target == overlay or (target != null and overlay.is_ancestor_of(target)):
+			return
+	_clear_selection()
+	_close_confirmation()
 
 
 func _unhandled_key_input(event: InputEvent) -> void:

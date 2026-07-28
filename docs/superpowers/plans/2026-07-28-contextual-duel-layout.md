@@ -1,6 +1,6 @@
 # Contextual Duel Layout Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** 把决斗界面重构为以中央战场为主体、动作跟随所选卡牌出现的黑白全屏布局。
 
@@ -30,7 +30,7 @@
 - `HandView` produces: `card_unhovered(card_data: Dictionary)` 与重复点击同卡时的取消选择事件。
 - Later tasks consume: `DuelBoard` 连接上述信号控制详情浮层。
 
-- [ ] **Step 1: 编写失败的交互契约测试**
+- [x] **Step 1: 编写失败的交互契约测试**
 
 创建 `tests/ui/test_contextual_duel_layout.gd`，实例化 `HandView`，连接
 `card_hovered`、`card_unhovered`、`card_selected`，调用对应内部事件后断言：
@@ -42,7 +42,7 @@ assert(selected_sequence == 2)
 assert(cancelled_on_second_click)
 ```
 
-- [ ] **Step 2: 运行测试确认失败**
+- [x] **Step 2: 运行测试确认失败**
 
 运行：
 
@@ -54,7 +54,7 @@ assert(cancelled_on_second_click)
 
 预期：因 `card_unhovered` 不存在或重复点击不取消而失败。
 
-- [ ] **Step 3: 实现事件**
+- [x] **Step 3: 实现事件**
 
 `CardView` 在 `mouse_exited` 时发出 `card_unhovered(card_data)`。
 `HandView` 转发该信号，并把重复点击当前 `_selected_key` 解释为空选择：
@@ -65,7 +65,7 @@ _selected_key = "" if clicked_key == _selected_key else clicked_key
 card_selected.emit({} if _selected_key.is_empty() else card_data)
 ```
 
-- [ ] **Step 4: 运行契约测试确认通过**
+- [x] **Step 4: 运行契约测试确认通过**
 
 重复 Step 2 命令，预期退出码为 0。
 
@@ -80,7 +80,7 @@ card_selected.emit({} if _selected_key.is_empty() else card_data)
 - Produces: `end_turn_requested`、`restart_requested`、`exit_requested`、`idle_action_requested`；这些信号签名保持不变。
 - Produces named controls: `Battlefield`, `CardDetailOverlay`, `ContextActionBar`, `PhaseButton`, `SystemTools`, `StatusToast`。
 
-- [ ] **Step 1: 扩展失败的布局契约测试**
+- [x] **Step 1: 扩展失败的布局契约测试**
 
 测试实例化 `DuelBoard` 并等待一帧，然后断言：
 
@@ -97,36 +97,36 @@ assert(!board.find_child("CardDetailOverlay", true, false).visible)
 并渲染含一张可操作手牌的快照，调用选中后断言详情和动作条显示；传入新快照后
 断言动作条隐藏。
 
-- [ ] **Step 2: 运行测试确认旧三栏布局失败**
+- [x] **Step 2: 运行测试确认旧三栏布局失败**
 
 运行 Task 1 的 Godot 命令，预期因缺少命名浮层而失败。
 
-- [ ] **Step 3: 重建场地根布局**
+- [x] **Step 3: 重建场地根布局**
 
 删除 `_build_detail_panel()` 和 `_build_action_panel()` 的永久列。建立全屏
 `Battlefield`，中央纵向排列对手手牌、四行区域和玩家手牌；双方状态分别锚定
 右上角与左下角，阶段控件锚定右侧中部。
 
-- [ ] **Step 4: 实现详情浮层**
+- [x] **Step 4: 实现详情浮层**
 
 创建默认隐藏的 `CardDetailOverlay`。悬停调用 `_preview_card()`，鼠标移开且
 `selected_card.is_empty()` 时关闭；点击调用 `_lock_card()`，空字典则清除详情。
 效果文字放入 `ScrollContainer`，防止长文本裁切。
 
-- [ ] **Step 5: 实现情境动作条**
+- [x] **Step 5: 实现情境动作条**
 
 创建默认隐藏的横向 `ContextActionBar`。只在精确匹配
 `controller/location/sequence/card_id` 的候选数量大于零时生成胶囊按钮；
 没有候选时保持隐藏，不生成占位文字。每次 `render_snapshot()` 先调用
 `_clear_selection()` 销毁旧按钮。
 
-- [ ] **Step 6: 实现阶段与系统确认**
+- [x] **Step 6: 实现阶段与系统确认**
 
 `PhaseButton` 仅在 `local_player_turn && can_end_turn` 时可点击；点击显示
 “结束回合 / 取消”。`SystemTools` 包含重新开局、信息、退出三个圆形文本按钮；
 重新开局和退出均需确认，信息按钮切换现有诊断浮层。
 
-- [ ] **Step 7: 运行布局契约测试确认通过**
+- [x] **Step 7: 运行布局契约测试确认通过**
 
 运行 Task 1 的 Godot 命令，预期退出码为 0。
 
@@ -142,7 +142,7 @@ assert(!board.find_child("CardDetailOverlay", true, false).visible)
   `turn_text: String`、双方卡牌和区域统计。
 - `DuelBoard.render_snapshot(snapshot: Dictionary)` consumes these exact keys。
 
-- [ ] **Step 1: 扩展快照测试**
+- [x] **Step 1: 扩展快照测试**
 
 在契约测试中分别渲染：
 
@@ -153,7 +153,7 @@ assert(!board.find_child("CardDetailOverlay", true, false).visible)
 
 断言第一份快照启用 `PhaseButton`，第二份禁用并清空动作条。
 
-- [ ] **Step 2: 修改主场景快照**
+- [x] **Step 2: 修改主场景快照**
 
 在 `_refresh_board()` 中增加：
 
@@ -167,7 +167,7 @@ assert(!board.find_child("CardDetailOverlay", true, false).visible)
 状态错误改为写入 `StatusToast` 对应公开方法，不再依赖已删除的右侧
 `status_label` 永久列。
 
-- [ ] **Step 3: 运行自动化回归**
+- [x] **Step 3: 运行自动化回归**
 
 运行：
 
@@ -183,7 +183,7 @@ git diff --check
 
 预期：8/8 原生测试通过，两次 Godot 进程退出码均为 0，差异检查无输出。
 
-- [ ] **Step 4: 使用 Godot MCP 验收**
+- [x] **Step 4: 使用 Godot MCP 验收**
 
 在原生全屏运行项目并验证：
 
