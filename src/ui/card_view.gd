@@ -9,10 +9,13 @@ var card_data: Dictionary = {}
 var face_down := false
 var selected := false
 
+@onready var selection_frame: Panel = %SelectionFrame
+@onready var face_down_label: Label = %FaceDownLabel
+@onready var animator: AnimationPlayer = %AnimationPlayer
+
 
 func _ready() -> void:
-	# 手牌以 1080P 为设计基准；父级场区可在节点进入树后覆盖为紧凑尺寸。
-	# 依赖容器的最小尺寸而非屏幕坐标，使 2K、4K 下仍可等比扩展。
+	# 手牌以 1080P 为设计基准；父级场区可在节点进入树后覆盖为紧凑尺寸，容器仍可据此自适应重排。
 	custom_minimum_size = Vector2(102, 149)
 	ignore_texture_size = true
 	stretch_mode = TextureButton.STRETCH_KEEP_ASPECT_CENTERED
@@ -26,36 +29,16 @@ func configure(data: Dictionary, show_back := false) -> void:
 	card_data = data
 	face_down = show_back
 	texture_normal = null
+	face_down_label.visible = show_back
 	tooltip_text = "对手手牌" if show_back else str(data.get("cn_name", data.get("card_id", "未知卡片")))
 	if !show_back:
-		var image_path := str(data.get("image_path", ""))
-		texture_normal = _load_external_texture(image_path)
-	queue_redraw()
+		texture_normal = _load_external_texture(str(data.get("image_path", "")))
 
 
 func set_selected(value: bool) -> void:
 	selected = value
-	queue_redraw()
-
-
-func _draw() -> void:
-	var bounds := Rect2(Vector2.ZERO, size)
-	if face_down:
-		draw_rect(bounds, Color("#111111"), true)
-		draw_rect(bounds.grow(-5), Color("#2d2d2d"), true)
-	elif texture_normal == null:
-		draw_rect(bounds, Color("#242424"), true)
-	draw_rect(bounds.grow(-1), Color.WHITE if selected else Color("#aaaaaa"), false, 3.0 if selected else 1.0)
-	if face_down:
-		draw_string(
-			ThemeDB.fallback_font,
-			Vector2(17, size.y * 0.54),
-			"CARD",
-			HORIZONTAL_ALIGNMENT_LEFT,
-			-1,
-			18,
-			Color.WHITE
-		)
+	selection_frame.visible = value
+	animator.play("select" if value else "reset")
 
 
 func _on_pressed() -> void:
@@ -65,11 +48,13 @@ func _on_pressed() -> void:
 
 func _on_mouse_entered() -> void:
 	if !face_down:
+		animator.play("hover_in")
 		card_hovered.emit(card_data)
 
 
 func _on_mouse_exited() -> void:
 	if !face_down:
+		animator.play("hover_out")
 		card_unhovered.emit(card_data)
 
 

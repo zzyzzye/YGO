@@ -1,0 +1,72 @@
+[gd_resource type="Theme" load_steps=7 format=3]
+
+[sub_resource type="StyleBoxFlat" id="StyleCardSelection"]
+bg_color = Color(0, 0, 0, 0)
+border_width_left = 3
+border_width_top = 3
+border_width_right = 3
+border_width_bottom = 3
+border_color = Color(1, 0.82, 0.2, 1)
+corner_radius_top_left = 6
+corner_radius_top_right = 6
+corner_radius_bottom_right = 6
+corner_radius_bottom_left = 6
+
+[sub_resource type="StyleBoxFlat" id="StyleZonePanel"]
+bg_color = Color(0.07, 0.09, 0.13, 0.94)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.45, 0.5, 0.58, 1)
+corner_radius_top_left = 6
+corner_radius_top_right = 6
+corner_radius_bottom_right = 6
+corner_radius_bottom_left = 6
+
+[sub_resource type="StyleBoxFlat" id="StyleTargetHighlight"]
+bg_color = Color(0.16, 0.66, 0.95, 0.16)
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 2
+border_color = Color(0.16, 0.66, 0.95, 1)
+corner_radius_top_left = 6
+corner_radius_top_right = 6
+corner_radius_bottom_right = 6
+corner_radius_bottom_left = 6
+
+[sub_resource type="StyleBoxFlat" id="StyleOverlayPanel"]
+bg_color = Color(0.03, 0.04, 0.06, 0.9)
+corner_radius_top_left = 8
+corner_radius_top_right = 8
+corner_radius_bottom_right = 8
+corner_radius_bottom_left = 8
+
+[sub_resource type="StyleBoxFlat" id="StylePhaseButton"]
+bg_color = Color(0.2, 0.34, 0.52, 1)
+corner_radius_top_left = 5
+corner_radius_top_right = 5
+corner_radius_bottom_right = 5
+corner_radius_bottom_left = 5
+
+[sub_resource type="StyleBoxFlat" id="StyleSystemButton"]
+bg_color = Color(0.18, 0.2, 0.24, 1)
+corner_radius_top_left = 5
+corner_radius_top_right = 5
+corner_radius_bottom_right = 5
+corner_radius_bottom_left = 5
+
+[resource]
+CardSelection/base_type = &"Panel"
+CardSelection/styles/panel = SubResource("StyleCardSelection")
+ZonePanel/base_type = &"Panel"
+ZonePanel/styles/panel = SubResource("StyleZonePanel")
+TargetHighlight/base_type = &"Panel"
+TargetHighlight/styles/panel = SubResource("StyleTargetHighlight")
+OverlayPanel/base_type = &"Panel"
+OverlayPanel/styles/panel = SubResource("StyleOverlayPanel")
+PhaseButton/base_type = &"Button"
+PhaseButton/styles/normal = SubResource("StylePhaseButton")
+SystemButton/base_type = &"Button"
+SystemButton/styles/normal = SubResource("StyleSystemButton")

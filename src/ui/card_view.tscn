@@ -1,0 +1,89 @@
+[gd_scene load_steps=7 format=3]
+
+[ext_resource type="Script" path="res://src/ui/card_view.gd" id="1_script"]
+[ext_resource type="Theme" path="res://src/ui/themes/duel_theme.tres" id="2_theme"]
+
+[sub_resource type="Animation" id="Animation_hover_in"]
+resource_name = "hover_in"
+length = 0.12
+tracks/0/type = "value"
+tracks/0/imported = false
+tracks/0/enabled = true
+tracks/0/path = NodePath(".:scale")
+tracks/0/interp = 1
+tracks/0/loop_wrap = true
+tracks/0/keys = {"times": PackedFloat32Array(0, 0.12), "transitions": PackedFloat32Array(1, 1), "update": 0, "values": [Vector2(1, 1), Vector2(1.04, 1.04)]}
+
+[sub_resource type="Animation" id="Animation_hover_out"]
+resource_name = "hover_out"
+length = 0.12
+tracks/0/type = "value"
+tracks/0/imported = false
+tracks/0/enabled = true
+tracks/0/path = NodePath(".:scale")
+tracks/0/interp = 1
+tracks/0/loop_wrap = true
+tracks/0/keys = {"times": PackedFloat32Array(0, 0.12), "transitions": PackedFloat32Array(1, 1), "update": 0, "values": [Vector2(1.04, 1.04), Vector2(1, 1)]}
+
+[sub_resource type="Animation" id="Animation_select"]
+resource_name = "select"
+length = 0.1
+tracks/0/type = "value"
+tracks/0/imported = false
+tracks/0/enabled = true
+tracks/0/path = NodePath(".:scale")
+tracks/0/interp = 1
+tracks/0/loop_wrap = true
+tracks/0/keys = {"times": PackedFloat32Array(0, 0.1), "transitions": PackedFloat32Array(1, 1), "update": 0, "values": [Vector2(1, 1), Vector2(1.06, 1.06)]}
+
+[sub_resource type="Animation" id="Animation_reset"]
+resource_name = "reset"
+length = 0.1
+tracks/0/type = "value"
+tracks/0/imported = false
+tracks/0/enabled = true
+tracks/0/path = NodePath(".:scale")
+tracks/0/interp = 1
+tracks/0/loop_wrap = true
+tracks/0/keys = {"times": PackedFloat32Array(0, 0.1), "transitions": PackedFloat32Array(1, 1), "update": 0, "values": [Vector2(1.06, 1.06), Vector2(1, 1)]}
+
+[sub_resource type="AnimationLibrary" id="AnimationLibrary_card"]
+_data = {"hover_in": SubResource("Animation_hover_in"), "hover_out": SubResource("Animation_hover_out"), "reset": SubResource("Animation_reset"), "select": SubResource("Animation_select")}
+
+[node name="CardView" type="TextureButton"]
+custom_minimum_size = Vector2(102, 149)
+ignore_texture_size = true
+stretch_mode = 2
+mouse_default_cursor_shape = 2
+theme = ExtResource("2_theme")
+script = ExtResource("1_script")
+
+[node name="SelectionFrame" type="Panel" parent="."]
+unique_name_in_owner = true
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+theme_type_variation = &"CardSelection"
+visible = false
+
+[node name="FaceDownLabel" type="Label" parent="."]
+unique_name_in_owner = true
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+text = "CARD"
+horizontal_alignment = 1
+vertical_alignment = 1
+visible = false
+
+[node name="AnimationPlayer" type="AnimationPlayer" parent="."]
+unique_name_in_owner = true
+libraries = {"": SubResource("AnimationLibrary_card")}
