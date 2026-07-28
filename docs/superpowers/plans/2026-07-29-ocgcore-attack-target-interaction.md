@@ -33,7 +33,7 @@
 - Produces: `CardSelectionOption` 和 `PendingAction::{description,cancelable,min_select,max_select,card_options}`。
 - Consumes: OCGCore `MSG_SELECT_YESNO`、`MSG_SELECT_CARD` 帧格式。
 
-- [ ] **Step 1: 为 YesNo 写失败测试**
+- [x] **Step 1: 为 YesNo 写失败测试**
 
 在 `test_duel_message_parser.cpp` 增加正常帧、非法玩家和截断描述测试：
 
@@ -49,7 +49,7 @@ assert(pending.description == 31);
 
 测试必须用局部 `stream` 保存 `framed()` 返回值，避免临时容器指针失效；另断言非法玩家和少于 10 字节的正文返回 `Malformed` 与中文诊断。
 
-- [ ] **Step 2: 运行解析器测试确认红灯**
+- [x] **Step 2: 运行解析器测试确认红灯**
 
 Run:
 
@@ -60,7 +60,7 @@ cmake --build build/native --target test_duel_message_parser -j 10
 
 Expected: 编译失败，提示 `YesNo` 或 `description` 尚不存在。
 
-- [ ] **Step 3: 为 SelectCard 写失败测试**
+- [x] **Step 3: 为 SelectCard 写失败测试**
 
 增加构造单选帧的测试辅助函数，并覆盖：
 
@@ -84,7 +84,7 @@ append_card_option(select, 456, 1, LOCATION_MZONE, 4, POS_FACEUP_DEFENSE);
 
 全部非法输入必须返回 `Malformed`，且 `card_options` 为空。
 
-- [ ] **Step 4: 实现值类型和两个解析函数**
+- [x] **Step 4: 实现值类型和两个解析函数**
 
 在头文件增加：
 
@@ -117,7 +117,7 @@ struct CardSelectionOption {
 逐字段读取并在成功前不写入最终候选。`parse_pending_action()` 对两种消息显式分派，
 并从 `requires_player_response()` 的 Unsupported 路径中移除。
 
-- [ ] **Step 5: 运行解析器测试确认绿灯**
+- [x] **Step 5: 运行解析器测试确认绿灯**
 
 Run:
 
@@ -128,7 +128,7 @@ cmake --build build/native --target test_duel_message_parser -j 10
 
 Expected: PASS，退出码 0。
 
-- [ ] **Step 6: 提交解析器变更**
+- [x] **Step 6: 提交解析器变更**
 
 ```bash
 git add native/include/ygo/duel_message_parser.hpp \
@@ -158,7 +158,7 @@ git commit -m "feat(规则): 解析攻击确认与卡牌候选" \
 - Produces: `submit_card_selection(std::size_t)`。
 - Produces: `cancel_card_selection()`。
 
-- [ ] **Step 1: 写响应构造与会话门禁失败测试**
+- [x] **Step 1: 写响应构造与会话门禁失败测试**
 
 新增纯值类型 `DuelResponse`：
 
@@ -176,7 +176,7 @@ struct DuelResponse {
 合法索引的 12 字节内容和取消的 `ff ff ff ff`。在现有 Session 测试中再断言当前
 Idle 决策调用 `submit_yes_no(true)` 返回“当前不是是非选择”且快照不变。
 
-- [ ] **Step 2: 运行会话测试确认红灯**
+- [x] **Step 2: 运行会话测试确认红灯**
 
 Run:
 
@@ -187,7 +187,7 @@ cmake --build build/native --target test_duel_session -j 10
 
 Expected: 编译失败，`duel_response.hpp` 和三个语义接口尚不存在。
 
-- [ ] **Step 3: 实现纯响应构造器**
+- [x] **Step 3: 实现纯响应构造器**
 
 `duel_response.cpp` 根据传入的不可变 `PendingAction` 完成全部 kind、候选与取消
 验证，并返回字节；不得调用 OCGCore。YesNo 的合法响应为：
@@ -218,19 +218,19 @@ const std::uint8_t response[12]{
 
 取消构造器仅在 `SelectCard && cancelable` 时返回 `int32_t(-1)` 的四字节小端值。
 
-- [ ] **Step 4: 让 Session 使用响应构造器**
+- [x] **Step 4: 让 Session 使用响应构造器**
 
 三个 Session 公共方法调用对应构造器；失败时原样返回中文错误和当前快照，不调用
 OCGCore。成功时先保存 `last_submitted_action_`、清除自动选区能力，再把
 `response.bytes` 交给 `OCG_DuelSetResponse`，清空当前快照并推进。把
 `duel_response.cpp` 加入 `ygo_duel_session`，新增 `test_duel_response` CTest。
 
-- [ ] **Step 5: 覆盖 Retry 恢复**
+- [x] **Step 5: 覆盖 Retry 恢复**
 
 构造 OCGCore 拒绝后的 `MSG_RETRY`，断言 `last_submitted_action_` 恢复 YesNo 或
 SelectCard 的完整字段和候选，且再次提交仍受相同门禁约束。
 
-- [ ] **Step 6: 运行 Session 与全套原生测试**
+- [x] **Step 6: 运行 Session 与全套原生测试**
 
 Run:
 
@@ -240,7 +240,7 @@ Run:
 
 Expected: CTest 全部通过，0 失败。
 
-- [ ] **Step 7: 提交会话变更**
+- [x] **Step 7: 提交会话变更**
 
 ```bash
 git add native/include/ygo/duel_session.hpp \
@@ -275,7 +275,7 @@ git commit -m "feat(规则): 提交攻击目标语义响应" \
 - Produces: pending 字典字段 `description`、`cancelable`、
   `min_select`、`max_select`、`card_options`。
 
-- [ ] **Step 1: 写 Bridge 值转换契约失败测试**
+- [x] **Step 1: 写 Bridge 值转换契约失败测试**
 
 把 `pending_action_to_dictionary(const PendingAction &)` 声明在新的
 `pending_action_godot_adapter.hpp` 中，并让新测试直接传入受控值类型，验证：
@@ -285,7 +285,7 @@ git commit -m "feat(规则): 提交攻击目标语义响应" \
 - 对手里侧候选不包含真实 `card_id`，正面候选可以包含。
 - `submit_card_selection(-1)` 返回中文范围错误而不窄化。
 
-- [ ] **Step 2: 实现值转换并扩展绑定**
+- [x] **Step 2: 实现值转换并扩展绑定**
 
 把现有转换从 `ygo_core_bridge.cpp` 移入 adapter 源文件，增加两个 kind，并始终写出
 选择元数据。候选转换规则：
@@ -305,7 +305,7 @@ if (option.controller == 0 || (option.position & POS_FACEUP) != 0) {
 `_bind_methods()`，方法名和参数名与规格一致。新增 adapter 测试目标，并让 Bridge
 链接该源文件。
 
-- [ ] **Step 3: 让 Main 识别新决策但暂不添加目标 UI**
+- [x] **Step 3: 让 Main 识别新决策但暂不添加目标 UI**
 
 `_refresh_board()` 继续原样读取状态，并在 snapshot 中加入：
 
@@ -320,7 +320,7 @@ if (option.controller == 0 || (option.position & POS_FACEUP) != 0) {
 
 `local_player_turn` 扩展到 `yes_no/select_card`，但仍要求 `player == 0` 且非终局。
 
-- [ ] **Step 4: 运行完整原生构建和 Godot 启动**
+- [x] **Step 4: 运行完整原生构建和 Godot 启动**
 
 Run:
 
@@ -332,7 +332,7 @@ Run:
 
 Expected: 原生 CTest 全绿；Godot 无项目自有错误。
 
-- [ ] **Step 5: 提交 Bridge 变更**
+- [x] **Step 5: 提交 Bridge 变更**
 
 ```bash
 git add native/include/ygo/ygo_core_bridge.hpp \
@@ -370,7 +370,7 @@ git commit -m "feat(桥接): 暴露攻击目标决策语义" \
   `yes_no_requested(accepted: bool)`。
 - Produces: `ZoneView.set_attack_target_preview(bool)`。
 
-- [ ] **Step 1: 写原生场景红灯契约**
+- [x] **Step 1: 写原生场景红灯契约**
 
 断言 `OpponentStatus` 的原生父容器中存在全锚点 `DirectAttackHighlight`，其
 `mouse_filter == Control.MOUSE_FILTER_IGNORE`，默认隐藏并消费
@@ -384,7 +384,7 @@ zone.set_targetable(true)
 assert(zone.target_highlight.theme_type_variation == &"TargetHighlight")
 ```
 
-- [ ] **Step 2: 运行场景契约确认红灯**
+- [x] **Step 2: 运行场景契约确认红灯**
 
 Run:
 
@@ -396,14 +396,14 @@ Run:
 
 Expected: 缺少 LP 高亮或预览 Theme 失败。
 
-- [ ] **Step 3: 用 `.tscn`/`.tres` 添加固定视觉**
+- [x] **Step 3: 用 `.tscn`/`.tres` 添加固定视觉**
 
 把 `OpponentStatus` 包入仍由 Container 管理的 `Control`/`PanelContainer`
 点击表面，增加忽略输入的高亮覆盖层；不得在 GDScript 中 `Panel.new()`。
 为直击、预览、合法目标、已选目标提供黑白层级明确的 StyleBox。所有覆盖层都不得
 截获卡牌悬浮或点击。
 
-- [ ] **Step 4: 写交互状态机红灯契约**
+- [x] **Step 4: 写交互状态机红灯契约**
 
 构造以下快照并直接驱动真实 `DuelBoard` 场景：
 
@@ -416,7 +416,7 @@ Expected: 缺少 LP 高亮或预览 Theme 失败。
 - 通用 YesNo：确认层显示“是”“否”，不显示 LP/怪兽目标。
 - 新快照/终局：所有高亮和动态按钮立即清除。
 
-- [ ] **Step 5: 实现 DuelBoard 表现与信号**
+- [x] **Step 5: 实现 DuelBoard 表现与信号**
 
 `render_snapshot()` 首先清理旧决策表现，再按新字段调用：
 
@@ -435,7 +435,7 @@ func _render_rule_decision(snapshot: Dictionary) -> void:
 或候选语义。候选位置映射同时比较 controller/location/sequence。点击 LP 的输入面
 必须是实际原生 Control，而不是通过全局鼠标坐标猜测。
 
-- [ ] **Step 6: 运行两个 Godot 契约确认绿灯**
+- [x] **Step 6: 运行两个 Godot 契约确认绿灯**
 
 Run:
 
@@ -450,7 +450,7 @@ Run:
 
 Expected: 两项均输出中文通过信息并退出 0。
 
-- [ ] **Step 7: 使用 Godot MCP 检查场景**
+- [x] **Step 7: 使用 Godot MCP 检查场景**
 
 通过 MCP：
 
@@ -459,7 +459,7 @@ Expected: 两项均输出中文通过信息并退出 0。
 3. 运行测试快照，触发 LP 与怪兽点击并读取信号计数。
 4. 停止实例，清理 MCP 注入。
 
-- [ ] **Step 8: 提交原生目标 UI**
+- [x] **Step 8: 提交原生目标 UI**
 
 ```bash
 git add src/ui/themes/duel_theme.tres \
@@ -487,7 +487,7 @@ git commit -m "feat(界面): 增加攻击目标情境交互" \
 - Produces: `Main` 的一次性 `_pending_attack_target_preview` 规则位置。
 - Produces: 完整 YesNo→SelectCard→规则快照状态机。
 
-- [ ] **Step 1: 写 FakeBridge 端到端红灯测试**
+- [x] **Step 1: 写 FakeBridge 端到端红灯测试**
 
 `test_attack_target_flow.gd` 使用可注入 FakeBridge 和入树 `Main`/`DuelBoard`，
 记录方法调用并返回后续 pending。测试以下序列：
@@ -507,7 +507,7 @@ SelectCard 含 sequence=2 → submit_card_selection(option.index)
 
 断言合法预选只自动提交一次；不合法预选不会提交 index，而是保留真实候选高亮。
 
-- [ ] **Step 2: 运行端到端测试确认红灯**
+- [x] **Step 2: 运行端到端测试确认红灯**
 
 Run:
 
@@ -519,7 +519,7 @@ Run:
 
 Expected: Main 尚未连接目标信号或 Bridge 方法。
 
-- [ ] **Step 3: 实现 Main 编排**
+- [x] **Step 3: 实现 Main 编排**
 
 连接 Task 4 的五类信号。规则为：
 
@@ -535,7 +535,7 @@ Expected: Main 尚未连接目标信号或 Bridge 方法。
 `_refresh_board()` 更新 LP/场面。重新开局、终局、非攻击 YesNo 和显式取消都清除
 预选。
 
-- [ ] **Step 4: 覆盖过期、重复和失败路径**
+- [x] **Step 4: 覆盖过期、重复和失败路径**
 
 FakeBridge 测试必须证明：
 
@@ -544,7 +544,7 @@ FakeBridge 测试必须证明：
 - Bridge 返回 `ok=false` 后解除本地提交锁但不清除合法目标。
 - 终局快照清空预选和高亮。
 
-- [ ] **Step 5: 运行全部 Godot 契约**
+- [x] **Step 5: 运行全部 Godot 契约**
 
 Run:
 
@@ -562,7 +562,7 @@ Run:
 
 Expected: 三项全部通过。
 
-- [ ] **Step 6: 提交完整编排**
+- [x] **Step 6: 提交完整编排**
 
 ```bash
 git add src/main/main.gd src/duel/duel_board.gd \
@@ -585,7 +585,7 @@ git commit -m "feat(战斗): 编排真实攻击目标流程" \
 - Consumes: 完整攻击流程。
 - Produces: 自动化、MCP 与清洁工作区的完成证据。
 
-- [ ] **Step 1: 扩展响应式满载测试**
+- [x] **Step 1: 扩展响应式满载测试**
 
 在现有 `1920×1080` 逻辑画布 + `canvas_items` Stretch 测试中分别渲染：
 
@@ -597,7 +597,7 @@ git commit -m "feat(战斗): 编排真实攻击目标流程" \
 对 `1920×1080`、`3840×2160` 和 `1920×1200` 检查 LP 点击面、阶段球、动作条、
 确认层、手牌与系统按钮矩形均位于安全区域且不重叠。
 
-- [ ] **Step 2: 运行完整自动化**
+- [x] **Step 2: 运行完整自动化**
 
 Run:
 
@@ -619,7 +619,7 @@ git diff --check
 Expected: CTest 全部通过；四项 Godot 测试输出中文通过信息；启动无项目错误；
 `git diff --check` 无输出。
 
-- [ ] **Step 3: 使用 Godot MCP 验收真实运行**
+- [x] **Step 3: 使用 Godot MCP 验收真实运行**
 
 必须在真实项目完成：
 
@@ -635,7 +635,7 @@ Expected: CTest 全部通过；四项 Godot 测试输出中文通过信息；启
 宿主不能创建物理 4K 窗口时，记录实际限制，同时以 headless 3840×2160 契约作为
 精确 Stretch 证据；不得把黑帧截图描述成成功截图。
 
-- [ ] **Step 4: 最终独立代码审查**
+- [x] **Step 4: 最终独立代码审查**
 
 审查范围从计划基线提交到当前 HEAD，逐项验证：
 
@@ -649,7 +649,7 @@ Expected: CTest 全部通过；四项 Godot 测试输出中文通过信息；启
 
 Critical/Important 必须修复并重新跑相应测试。
 
-- [ ] **Step 5: 更新计划完成勾选并提交验收**
+- [x] **Step 5: 更新计划完成勾选并提交验收**
 
 ```bash
 git add tests/ui/test_responsive_duel_layout.gd \
