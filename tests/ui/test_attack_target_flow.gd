@@ -28,6 +28,8 @@ class FakeBridge:
 	var select_min := 1
 	var select_max := 1
 	var select_cancelable := true
+	var attack_returns_select_card := false
+	var opponent_monster_sequences: Array[int] = [0, 2]
 	var fail_next_method := ""
 	var reentrant_direct_request := Callable()
 
@@ -88,7 +90,7 @@ class FakeBridge:
 					"extra": 0,
 					"graveyard": 0,
 					"banished": 0,
-					"monster_cards": [_opponent_monster(0), _opponent_monster(2)],
+					"monster_cards": _opponent_monsters(),
 					"spell_trap_cards": [],
 				},
 			},
@@ -101,7 +103,11 @@ class FakeBridge:
 		calls.append({"method": "submit_battle_action", "kind": action_kind, "index": index})
 		if _consume_failure("submit_battle_action"):
 			return _failure("测试战斗动作失败")
-		pending = _yes_no_pending(31)
+		pending = (
+			_select_card_pending(select_options)
+			if attack_returns_select_card
+			else _yes_no_pending(31)
+		)
 		return _success("等待攻击路线")
 
 	func submit_yes_no(accepted: bool) -> Dictionary:
@@ -210,6 +216,12 @@ class FakeBridge:
 			"cn_name": "测试目标怪兽%s" % sequence,
 		}
 
+	func _opponent_monsters() -> Array:
+		var monsters: Array = []
+		for sequence in opponent_monster_sequences:
+			monsters.append(_opponent_monster(sequence))
+		return monsters
+
 
 func _initialize() -> void:
 	call_deferred("_run")
@@ -220,7 +232,15 @@ func _run() -> void:
 		return
 	if !await _test_exact_preview_auto_submission():
 		return
-	if !await _test_invalid_preview_falls_back_to_real_candidate():
+	if !await _test_preview_ignores_reentrant_direct_attack():
+		return
+	if !await _test_effect_select_card_never_uses_attack_target_ui():
+		return
+	if !await _test_direct_select_card_exposes_all_five_targets():
+		return
+	if !await _test_mixed_candidates_reject_entire_attack_context():
+		return
+	if !await _test_unmapped_non_cancelable_selection_shows_diagnostic():
 		return
 	if !await _test_failed_submission_unlocks_without_losing_target():
 		return
@@ -293,26 +313,135 @@ func _test_exact_preview_auto_submission() -> bool:
 	return true
 
 
-func _test_invalid_preview_falls_back_to_real_candidate() -> bool:
+func _test_preview_ignores_reentrant_direct_attack() -> bool:
+	var fake := FakeBridge.new()
+	var main = await _mount_main(fake)
+	if !_request_attack(main):
+		return false
+	var board: DuelBoard = main.board
+	var previews_after_reentry: Array[Dictionary] = []
+	fake.reentrant_direct_request = func() -> void:
+		board.direct_attack_requested.emit()
+		previews_after_reentry.append(main._pending_attack_target_preview.duplicate())
+	board.opponent_monster_zones[2].card_selected.emit(fake._opponent_monster(2))
+	var yes_no_calls := fake.method_calls("submit_yes_no")
+	var selection_calls := fake.method_calls("submit_card_selection")
+	if !_check(
+		previews_after_reentry == [{
+			"controller": 1,
+			"location": 4,
+			"sequence": 2,
+		}]
+			and yes_no_calls.size() == 1
+			and !bool(yes_no_calls[0].accepted)
+			and selection_calls.size() == 1
+			and int(selection_calls[0].index) == 17,
+		"预选提交中的重入直击必须零副作用，外层返回后仍应精确自动提交一次"
+	):
+		return false
+	await _unmount_main(main)
+	return true
+
+
+func _test_effect_select_card_never_uses_attack_target_ui() -> bool:
+	var fake := FakeBridge.new()
+	var main = await _mount_main(fake)
+	var board: DuelBoard = main.board
+	fake.pending = fake._select_card_pending([
+		{
+			"index": 19,
+			"controller": 1,
+			"location": 4,
+			"sequence": 0,
+		},
+		{
+			"index": 20,
+			"controller": 1,
+			"location": 4,
+			"sequence": 2,
+		},
+	])
+	main._refresh_board("测试效果卡牌选择")
+	board.opponent_monster_zones[0].card_selected.emit(fake._opponent_monster(0))
+	board.attack_target_requested.emit(19)
+	board.card_selection_cancel_requested.emit()
+	if !_check(
+		!board.opponent_monster_zones[0].target_highlight.visible
+			and !board.opponent_monster_zones[2].target_highlight.visible
+			and !board.action_box.visible
+			and board.action_box.get_child_count() == 0
+			and board.status_label.text
+				== "当前卡牌选择上下文尚未支持：候选无法完整映射为攻击目标"
+			and str(fake.pending.get("kind", "none")) == "select_card"
+			and str(main._current_pending_action.get("kind", "none")) == "select_card"
+			and fake.method_calls("submit_card_selection").is_empty()
+			and fake.method_calls("cancel_card_selection").is_empty(),
+		"非攻击效果 SelectCard 即使候选完整，也不得伪装成攻击目标或触碰 Bridge"
+	):
+		return false
+	await _unmount_main(main)
+	return true
+
+
+func _test_direct_select_card_exposes_all_five_targets() -> bool:
+	var fake := FakeBridge.new()
+	fake.attack_returns_select_card = true
+	fake.opponent_monster_sequences = [0, 1, 2, 3, 4]
+	fake.select_options = []
+	for sequence in range(5):
+		fake.select_options.append({
+			"index": 50 + sequence,
+			"controller": 1,
+			"location": 4,
+			"sequence": sequence,
+		})
+	var main = await _mount_main(fake)
+	if !_request_attack(main, "select_card"):
+		return false
+	var board: DuelBoard = main.board
+	for sequence in range(5):
+		if !_check(
+			board.opponent_monster_zones[sequence].target_highlight.visible,
+			"攻击动作直接返回 SelectCard 时五个真实候选必须全部高亮"
+		):
+			return false
+	board.opponent_monster_zones[4].card_selected.emit(fake._opponent_monster(4))
+	var selection_calls := fake.method_calls("submit_card_selection")
+	if !_check(
+		selection_calls.size() == 1 and int(selection_calls[0].index) == 54,
+		"直接 SelectCard 路径必须提交当前五目标快照中的真实候选索引"
+	):
+		return false
+	await _unmount_main(main)
+	return true
+
+
+func _test_mixed_candidates_reject_entire_attack_context() -> bool:
 	var fake := FakeBridge.new()
 	fake.select_options = [
 		{
 			"index": 21,
+			"controller": 1,
+			"location": 4,
+			"sequence": 0,
+		},
+		{
+			"index": 22,
 			"controller": 0,
 			"location": 4,
 			"sequence": 2,
 		},
 		{
-			"index": 22,
+			"index": 23,
 			"controller": 1,
 			"location": 8,
 			"sequence": 2,
 		},
 		{
-			"index": 23,
+			"index": 24,
 			"controller": 1,
 			"location": 4,
-			"sequence": 0,
+			"sequence": 5,
 		},
 	]
 	var main = await _mount_main(fake)
@@ -322,16 +451,65 @@ func _test_invalid_preview_falls_back_to_real_candidate() -> bool:
 	board.opponent_monster_zones[2].card_selected.emit(fake._opponent_monster(2))
 	if !_check(
 		fake.method_calls("submit_card_selection").is_empty()
-			and board.opponent_monster_zones[0].target_highlight.visible
-			and !board.opponent_monster_zones[2].target_highlight.visible,
-		"非法预选不得提交索引，必须保留真实候选高亮"
+			and !board.opponent_monster_zones[0].target_highlight.visible
+			and !board.opponent_monster_zones[2].target_highlight.visible
+			and !board.action_box.visible
+			and board.action_box.get_child_count() == 0
+			and board.status_label.text
+				== "当前卡牌选择上下文尚未支持：候选无法完整映射为攻击目标"
+			and str(fake.pending.get("kind", "none")) == "select_card"
+			and str(main._current_pending_action.get("kind", "none")) == "select_card",
+		"混合候选中任一字段非法时必须整组拒绝，不能保留可映射子集"
 	):
 		return false
 	board.opponent_monster_zones[0].card_selected.emit(fake._opponent_monster(0))
-	var selection_calls := fake.method_calls("submit_card_selection")
+	board.attack_target_requested.emit(21)
+	board.card_selection_cancel_requested.emit()
 	if !_check(
-		selection_calls.size() == 1 and int(selection_calls[0].index) == 23,
-		"合法候选点击必须提交当前快照的候选索引"
+		fake.method_calls("submit_card_selection").is_empty()
+			and fake.method_calls("cancel_card_selection").is_empty(),
+		"整组不支持时点击、残留目标信号和取消信号都不得触碰 Bridge"
+	):
+		return false
+	await _unmount_main(main)
+	return true
+
+
+func _test_unmapped_non_cancelable_selection_shows_diagnostic() -> bool:
+	var fake := FakeBridge.new()
+	fake.select_cancelable = false
+	fake.select_options = [{
+		"index": 25,
+		"controller": 1,
+		"location": 4,
+		"sequence": 1,
+	}]
+	var main = await _mount_main(fake)
+	if !_request_attack(main):
+		return false
+	var board: DuelBoard = main.board
+	board.opponent_monster_zones[2].card_selected.emit(fake._opponent_monster(2))
+	if !_check(
+		!board.opponent_monster_zones[0].target_highlight.visible
+			and !board.opponent_monster_zones[2].target_highlight.visible
+			and !board.action_box.visible
+			and board.action_box.get_child_count() == 0
+			and board.status_label.text
+				== "当前卡牌选择上下文尚未支持：候选无法完整映射为攻击目标"
+			and str(fake.pending.get("kind", "none")) == "select_card"
+			and str(main._current_pending_action.get("kind", "none")) == "select_card",
+			"候选全部不可映射且不可取消时必须保留诊断，不能制造无入口目标状态"
+	):
+		return false
+	fake.pending = fake._select_card_pending([])
+	main._refresh_board("测试空候选攻击选择")
+	if !_check(
+		board.status_label.text
+			== "当前卡牌选择上下文尚未支持：候选无法完整映射为攻击目标"
+			and !board.action_box.visible
+			and !board.opponent_monster_zones[0].target_highlight.visible
+			and !board.opponent_monster_zones[2].target_highlight.visible,
+		"空候选不能形成可支持的攻击目标上下文"
 	):
 		return false
 	await _unmount_main(main)
@@ -373,12 +551,15 @@ func _test_failed_submission_unlocks_without_losing_target() -> bool:
 
 
 func _test_illegal_pending_never_touches_bridge() -> bool:
-	var fake := FakeBridge.new()
-	var main = await _mount_main(fake)
-	var board: DuelBoard = main.board
 	var matching_options := [
 		{
 			"index": 41,
+			"controller": 1,
+			"location": 4,
+			"sequence": 0,
+		},
+		{
+			"index": 42,
 			"controller": 1,
 			"location": 4,
 			"sequence": 2,
@@ -388,39 +569,57 @@ func _test_illegal_pending_never_touches_bridge() -> bool:
 		{"player": 1, "min": 1, "max": 1},
 		{"player": 0, "min": 2, "max": 2},
 	]:
-		main._pending_attack_target_preview = {
-			"controller": 1,
-			"location": 4,
-			"sequence": 2,
-		}
+		var fake := FakeBridge.new()
+		fake.attack_returns_select_card = true
 		fake.select_player = int(invalid_shape.player)
 		fake.select_min = int(invalid_shape.min)
 		fake.select_max = int(invalid_shape.max)
-		fake.pending = fake._select_card_pending(matching_options)
-		main._refresh_board("测试非法选择决策门禁")
+		fake.select_options = matching_options
+		var main = await _mount_main(fake)
+		if !_request_attack(main, "select_card"):
+			return false
+		var board: DuelBoard = main.board
 		board.attack_target_requested.emit(41)
 		board.card_selection_cancel_requested.emit()
-	if !_check(
-		fake.method_calls("submit_card_selection").is_empty()
-			and fake.method_calls("cancel_card_selection").is_empty()
-			and main._pending_attack_target_preview.is_empty(),
-		"对手或非单选 SelectCard 不得自动提交，也不得接受残留目标/取消信号"
-	):
-		return false
+		if !_check(
+			fake.method_calls("submit_card_selection").is_empty()
+				and fake.method_calls("cancel_card_selection").is_empty()
+				and main._pending_attack_target_preview.is_empty()
+				and main._attack_target_context_state == main.ATTACK_CONTEXT_NONE
+				and !main._current_attack_target_context_supported
+				and !board.opponent_monster_zones[0].target_highlight.visible
+				and !board.opponent_monster_zones[2].target_highlight.visible
+				and !board.action_box.visible,
+			"攻击动作直返的对手或非单选 SelectCard 必须清除来源且拒绝残留信号"
+		):
+			return false
+		await _unmount_main(main)
 
+	var fake := FakeBridge.new()
+	fake.attack_returns_select_card = true
 	fake.select_player = 0
 	fake.select_min = 1
 	fake.select_max = 1
 	fake.select_cancelable = false
-	fake.pending = fake._select_card_pending(matching_options)
-	main._refresh_board("测试不可取消决策门禁")
+	fake.select_options = [matching_options[1]]
+	var main = await _mount_main(fake)
+	if !_request_attack(main, "select_card"):
+		return false
+	var board: DuelBoard = main.board
 	board.card_selection_cancel_requested.emit()
 	if !_check(
-		fake.method_calls("cancel_card_selection").is_empty(),
-		"不可取消的 SelectCard 不得把残留取消信号提交给 Bridge"
+		fake.method_calls("cancel_card_selection").is_empty()
+			and board.opponent_monster_zones[2].target_highlight.visible
+			and !board.action_box.visible
+			and main._current_attack_target_context_supported,
+		"合法攻击上下文中的不可取消 SelectCard 不得把残留取消信号提交给 Bridge"
 	):
 		return false
+	await _unmount_main(main)
 
+	fake = FakeBridge.new()
+	main = await _mount_main(fake)
+	board = main.board
 	fake.pending = fake._yes_no_pending(99)
 	fake.pending.player = 1
 	main._refresh_board("测试对手确认门禁")
@@ -572,6 +771,33 @@ func _test_cancel_generic_yes_no_restart_and_game_over_cleanup() -> bool:
 	):
 		return false
 
+	if !_request_attack(main):
+		return false
+	if !_check(
+		main._attack_target_context_state == main.ATTACK_CONTEXT_ROUTE
+			and main._current_attack_target_context_supported,
+		"重开门禁必须从真实活动攻击路线开始验收"
+	):
+		return false
+	board.restart_requested.emit()
+	if !_check(
+		main._attack_target_context_state == main.ATTACK_CONTEXT_NONE
+			and !main._current_attack_target_context_supported
+			and str(fake.pending.kind) == "battle",
+		"活动攻击路线重开后必须清除来源上下文并采用新决斗快照"
+	):
+		return false
+
+	if !_request_attack(main):
+		return false
+	board.opponent_monster_zones[2].card_selected.emit(fake._opponent_monster(2))
+	if !_check(
+		main._attack_target_context_state == main.ATTACK_CONTEXT_TARGET
+			and main._current_attack_target_context_supported
+			and str(fake.pending.kind) == "select_card",
+		"终局门禁必须从真实活动攻击目标上下文开始验收"
+	):
+		return false
 	main._pending_attack_target_preview = {
 		"controller": 1,
 		"location": 4,
@@ -587,11 +813,13 @@ func _test_cancel_generic_yes_no_restart_and_game_over_cleanup() -> bool:
 	board.card_selection_cancel_requested.emit()
 	if !_check(
 		main._pending_attack_target_preview.is_empty()
+			and main._attack_target_context_state == main.ATTACK_CONTEXT_NONE
+			and !main._current_attack_target_context_supported
 			and !board.opponent_monster_zones[0].target_highlight.visible
 			and !board.action_box.visible
 			and fake.method_calls("submit_card_selection").size() == terminal_selection_count
 			and fake.method_calls("cancel_card_selection").size() == terminal_cancel_count,
-		"终局快照必须清除预选和高亮，并拒绝残留候选或取消信号"
+		"终局快照必须清除攻击来源上下文、预选和高亮，并拒绝残留候选或取消信号"
 	):
 		return false
 	await _unmount_main(main)
@@ -613,17 +841,21 @@ func _unmount_main(main) -> void:
 	await process_frame
 
 
-func _request_attack(main) -> bool:
+func _request_attack(main, expected_pending_kind := "yes_no") -> bool:
 	var board: DuelBoard = main.board
 	var attacker: Dictionary = main.bridge._player_attacker()
 	board.player_monster_zones[0].card_selected.emit(attacker)
 	for child in board.action_box.get_children():
 		if child is Button and str(child.text) == "攻击":
 			child.pressed.emit()
+			var pending: Dictionary = main.bridge.pending
 			return _check(
-				str(main.bridge.pending.kind) == "yes_no"
-					and int(main.bridge.pending.description) == 31,
-				"攻击按钮必须通过 Main 把真实战斗动作提交给 Bridge"
+				str(pending.get("kind", "none")) == expected_pending_kind
+					and (
+						expected_pending_kind != "yes_no"
+						or int(pending.get("description", 0)) == 31
+					),
+				"攻击按钮必须通过 Main 把真实战斗动作提交为预期规则决策"
 			)
 	return _check(false, "真实 DuelBoard 未生成攻击动作按钮")
 

@@ -2,6 +2,11 @@ extends Control
 
 const DUEL_SEED = 0x59474f
 const STARTING_DECK_SIZE = 40
+const ATTACK_CONTEXT_NONE := 0
+const ATTACK_CONTEXT_SUBMITTING_ACTION := 1
+const ATTACK_CONTEXT_ROUTE := 2
+const ATTACK_CONTEXT_AWAITING_TARGET := 3
+const ATTACK_CONTEXT_TARGET := 4
 
 var bridge: Object
 # DuelBoard 由 Main 场景直接实例化，唯一节点既是编辑器内可见的布局，也是运行时
@@ -16,6 +21,12 @@ var _submission_in_progress := false
 # Main 只接受当前已渲染快照中的候选索引。成功提交并刷新后，这份快照会被替换，
 # 因此旧节点或延迟信号不能重复使用上一帧 index。
 var _current_pending_action: Dictionary = {}
+# 攻击目标只能来自本地提交的 attack 动作，不能仅凭 SelectCard 的形状猜测。
+# 状态机跨越同步 Bridge 调用保存来源；其他规则决策、终局或重开都会清零。
+var _attack_target_context_state := ATTACK_CONTEXT_NONE
+# 该值对应当前已经渲染的快照。攻击目标与取消处理器必须再次检查它，防止
+# 已清理节点或人工残留信号绕过 DuelBoard 的表现门禁。
+var _current_attack_target_context_supported := false
 
 
 func _ready() -> void:
@@ -56,6 +67,7 @@ func _connect_board_signals() -> void:
 
 func _start_duel(duel_seed: int) -> void:
 	_clear_attack_target_preview()
+	_clear_attack_target_context()
 	_current_pending_action.clear()
 	_submission_in_progress = false
 	var source_ids: PackedInt64Array = bridge.call("get_scripted_card_ids")
@@ -94,12 +106,35 @@ func _refresh_board(status_text: String) -> void:
 		return
 
 	var game_over := bool(state.get("game_over", false))
+	_update_attack_target_context(pending, game_over)
+	var player_state: Dictionary = state.players.p1
+	var opponent_state: Dictionary = state.players.p2
 	# 终局快照可能仍带核心最后一个 SelectCard；它只用于调试展示，不能继续
 	# 作为 Main 的可提交快照，否则延迟到达的旧候选信号仍会触碰 Bridge。
 	_current_pending_action = {} if game_over else pending.duplicate(true)
+	_current_attack_target_context_supported = (
+		!game_over
+		and (
+			(
+				_attack_target_context_state == ATTACK_CONTEXT_ROUTE
+				and _is_local_attack_route_pending(pending)
+			)
+			or (
+				_attack_target_context_state == ATTACK_CONTEXT_TARGET
+				and _is_complete_attack_target_selection(
+					pending,
+					opponent_state.get("monster_cards", [])
+				)
+			)
+		)
+	)
 	# 预选只允许跨越攻击路线 YesNo→SelectCard 这一条规则边。其他决策、
 	# 重新开局和终局都不能继承旧位置，否则可能命中另一帧恰好同序号的卡。
-	if game_over or !_is_local_single_card_selection(pending):
+	if (
+		game_over
+		or _attack_target_context_state != ATTACK_CONTEXT_TARGET
+		or !_current_attack_target_context_supported
+	):
 		_clear_attack_target_preview()
 	var actions: Array = []
 	if !game_over and int(pending.get("player", -1)) == 0:
@@ -108,8 +143,6 @@ func _refresh_board(status_text: String) -> void:
 			if str(pending.get("kind", "none")) == "battle"
 			else pending.get("idle_actions", [])
 		)
-	var player_state: Dictionary = state.players.p1
-	var opponent_state: Dictionary = state.players.p2
 	var effective_status := status_text
 	if game_over:
 		var winner := int(state.get("winner", -1))
@@ -147,6 +180,9 @@ func _refresh_board(status_text: String) -> void:
 		"selection_min": int(pending.get("min_select", 0)),
 		"selection_max": int(pending.get("max_select", 0)),
 		"card_options": pending.get("card_options", []),
+		# DuelBoard 只能在 Main 已证明决策来源属于当前攻击流程时解释目标；
+		# false 的 SelectCard 仍保留在 Bridge pending 中，但不会获得攻击入口。
+		"attack_target_context_supported": _current_attack_target_context_supported,
 		"can_enter_battle": bool(pending.get("can_enter_battle", false)),
 		"can_enter_main2": bool(pending.get("can_enter_main2", false)),
 		"can_end_battle": bool(pending.get("can_end_battle", false)),
@@ -166,7 +202,11 @@ func _refresh_board(status_text: String) -> void:
 		],
 	}
 	board.render_snapshot(snapshot)
-	if !game_over and _is_local_single_card_selection(pending):
+	if (
+		!game_over
+		and _current_attack_target_context_supported
+		and _attack_target_context_state == ATTACK_CONTEXT_TARGET
+	):
 		_submit_previewed_attack_target(pending)
 
 
@@ -211,13 +251,23 @@ func _submit_phase_action(method_name: String, success_text: String) -> void:
 
 
 func _on_battle_action_requested(
-		action_kind: String,
-		index: int,
-		_card_data: Dictionary
+	action_kind: String,
+	index: int,
+	_card_data: Dictionary
 ) -> void:
+	if _submission_in_progress:
+		return
 	_clear_attack_target_preview()
+	_clear_attack_target_context()
+	if action_kind == "attack":
+		# 必须在调用 Bridge 前进入临时状态；同步返回的新 pending 只有在这条
+		# 已成功提交的本地攻击路径上，才有资格被提升为路线或目标上下文。
+		_attack_target_context_state = ATTACK_CONTEXT_SUBMITTING_ACTION
+	_submission_in_progress = true
 	var response: Dictionary = bridge.call("submit_battle_action", action_kind, index)
+	_submission_in_progress = false
 	if !response.ok:
+		_clear_attack_target_context()
 		board.show_status("战斗动作失败：" + str(response.message))
 		return
 	board._clear_selection()
@@ -225,6 +275,8 @@ func _on_battle_action_requested(
 
 
 func _on_direct_attack_requested() -> void:
+	if _submission_in_progress:
+		return
 	if !_is_attack_route_pending():
 		return
 	_clear_attack_target_preview()
@@ -232,7 +284,7 @@ func _on_direct_attack_requested() -> void:
 
 
 func _on_attack_target_preview_requested(location: Dictionary) -> void:
-	if !_is_attack_route_pending() or _submission_in_progress:
+	if _submission_in_progress or !_is_attack_route_pending():
 		return
 	_pending_attack_target_preview = _rule_location(location)
 	_submit_yes_no_response(false, "已进入攻击目标选择")
@@ -241,7 +293,8 @@ func _on_attack_target_preview_requested(location: Dictionary) -> void:
 func _on_attack_target_requested(option_index: int) -> void:
 	if (
 		_submission_in_progress
-		or !_is_local_single_card_selection(_current_pending_action)
+		or !_current_attack_target_context_supported
+		or _attack_target_context_state != ATTACK_CONTEXT_TARGET
 		or !_current_pending_has_option(option_index)
 	):
 		return
@@ -252,13 +305,15 @@ func _on_attack_target_requested(option_index: int) -> void:
 		board.show_status("攻击目标提交失败：" + str(response.get("message", "未知错误")))
 		return
 	_clear_attack_target_preview()
+	_clear_attack_target_context()
 	_refresh_board("攻击目标已提交，场面已由 OCGCore 更新")
 
 
 func _on_card_selection_cancel_requested() -> void:
 	if (
 		_submission_in_progress
-		or !_is_local_single_card_selection(_current_pending_action)
+		or !_current_attack_target_context_supported
+		or _attack_target_context_state != ATTACK_CONTEXT_TARGET
 		or !bool(_current_pending_action.get("cancelable", false))
 	):
 		return
@@ -271,12 +326,14 @@ func _on_card_selection_cancel_requested() -> void:
 	if !bool(response.get("ok", false)):
 		board.show_status("取消目标选择失败：" + str(response.get("message", "未知错误")))
 		return
+	_clear_attack_target_context()
 	_refresh_board("已取消攻击目标选择")
 
 
 func _on_yes_no_requested(accepted: bool) -> void:
 	if (
-		str(_current_pending_action.get("kind", "none")) != "yes_no"
+		_submission_in_progress
+		or str(_current_pending_action.get("kind", "none")) != "yes_no"
 		or int(_current_pending_action.get("player", -1)) != 0
 		or int(_current_pending_action.get("description", 0)) == 31
 	):
@@ -288,12 +345,22 @@ func _on_yes_no_requested(accepted: bool) -> void:
 func _submit_yes_no_response(accepted: bool, success_text: String) -> void:
 	if _submission_in_progress:
 		return
+	var responds_to_attack_route := (
+		_attack_target_context_state == ATTACK_CONTEXT_ROUTE
+		and _is_local_attack_route_pending(_current_pending_action)
+	)
 	_submission_in_progress = true
 	var response: Dictionary = bridge.call("submit_yes_no", accepted)
 	_submission_in_progress = false
 	if !bool(response.get("ok", false)):
 		board.show_status("规则确认失败：" + str(response.get("message", "未知错误")))
 		return
+	if responds_to_attack_route:
+		_attack_target_context_state = (
+			ATTACK_CONTEXT_NONE
+			if accepted
+			else ATTACK_CONTEXT_AWAITING_TARGET
+		)
 	_refresh_board(success_text)
 
 
@@ -328,12 +395,80 @@ func _is_local_single_card_selection(pending: Dictionary) -> bool:
 	)
 
 
+func _is_complete_attack_target_selection(
+	pending: Dictionary,
+	opponent_monsters: Array
+) -> bool:
+	if !_is_local_single_card_selection(pending):
+		return false
+	var options: Array = pending.get("card_options", [])
+	if options.is_empty():
+		return false
+
+	# 决斗状态中的对手怪兽可能因隐藏信息省略卡号，但 sequence 仍是公开且稳定的
+	# OCGCore 卡位语义。只记录实际存在的 0..4 卡位，不读取或输出任何身份字段。
+	var occupied_sequences: Dictionary = {}
+	for monster in opponent_monsters:
+		var sequence := int(monster.get("sequence", -1))
+		if sequence >= 0 and sequence <= 4:
+			occupied_sequences[sequence] = true
+
+	# 不能把部分可映射候选降级成较小集合，否则界面提交的选择范围会与核心不同。
+	# 任一候选不属于对手怪兽区、越界或没有对应快照卡位时，整组都不受支持。
+	for option in options:
+		var controller := int(option.get("controller", -1))
+		var location := int(option.get("location", -1))
+		var sequence := int(option.get("sequence", -1))
+		if (
+			controller != 1
+			or location != 4
+			or sequence < 0
+			or sequence > 4
+			or !occupied_sequences.has(sequence)
+		):
+			return false
+	return true
+
+
 func _is_attack_route_pending() -> bool:
 	return (
-		str(_current_pending_action.get("kind", "none")) == "yes_no"
-		and int(_current_pending_action.get("player", -1)) == 0
-		and int(_current_pending_action.get("description", 0)) == 31
+		_attack_target_context_state == ATTACK_CONTEXT_ROUTE
+		and _current_attack_target_context_supported
+		and _is_local_attack_route_pending(_current_pending_action)
 	)
+
+
+func _is_local_attack_route_pending(pending: Dictionary) -> bool:
+	return (
+		str(pending.get("kind", "none")) == "yes_no"
+		and int(pending.get("player", -1)) == 0
+		and int(pending.get("description", 0)) == 31
+	)
+
+
+func _update_attack_target_context(pending: Dictionary, game_over: bool) -> void:
+	if game_over:
+		_clear_attack_target_context()
+		return
+	match _attack_target_context_state:
+		ATTACK_CONTEXT_SUBMITTING_ACTION:
+			if _is_local_attack_route_pending(pending):
+				_attack_target_context_state = ATTACK_CONTEXT_ROUTE
+			elif _is_local_single_card_selection(pending):
+				_attack_target_context_state = ATTACK_CONTEXT_TARGET
+			else:
+				_clear_attack_target_context()
+		ATTACK_CONTEXT_AWAITING_TARGET:
+			if _is_local_single_card_selection(pending):
+				_attack_target_context_state = ATTACK_CONTEXT_TARGET
+			else:
+				_clear_attack_target_context()
+		ATTACK_CONTEXT_ROUTE:
+			if !_is_local_attack_route_pending(pending):
+				_clear_attack_target_context()
+		ATTACK_CONTEXT_TARGET:
+			if !_is_local_single_card_selection(pending):
+				_clear_attack_target_context()
 
 
 func _rule_location(data: Dictionary) -> Dictionary:
@@ -348,6 +483,11 @@ func _clear_attack_target_preview() -> void:
 	_pending_attack_target_preview.clear()
 
 
+func _clear_attack_target_context() -> void:
+	_attack_target_context_state = ATTACK_CONTEXT_NONE
+	_current_attack_target_context_supported = false
+
+
 func _turn_text(pending: Dictionary) -> String:
 	if str(pending.get("kind", "none")) == "idle":
 		return "玩家%s · 主阶段" % [int(pending.get("player", -1)) + 1]
@@ -358,6 +498,7 @@ func _turn_text(pending: Dictionary) -> String:
 
 func _on_restart_requested() -> void:
 	_clear_attack_target_preview()
+	_clear_attack_target_context()
 	var new_seed := int(Time.get_unix_time_from_system()) & 0x7fffffff
 	_start_duel(new_seed if new_seed > 0 else DUEL_SEED)
 

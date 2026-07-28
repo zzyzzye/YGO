@@ -417,6 +417,7 @@ func _run() -> void:
 	var attack_route_snapshot := {
 		"decision_kind": "yes_no",
 		"decision_description": 31,
+		"attack_target_context_supported": true,
 		"local_player_turn": true,
 		"opponent_monsters": [opponent_monster_0, opponent_monster_2],
 	}
@@ -466,12 +467,13 @@ func _run() -> void:
 		_fail("点击怪兽预览必须只转发规则位置，不能提前伪造候选索引")
 		return
 
-	var card_selection_snapshot := {
+	var unsupported_card_selection_snapshot := {
 		"decision_kind": "select_card",
+		"attack_target_context_supported": false,
 		"local_player_turn": true,
 		"selection_min": 1,
 		"selection_max": 1,
-		"selection_cancelable": false,
+		"selection_cancelable": true,
 		"phase_kind": "idle",
 		"can_enter_battle": true,
 		"can_end_turn": true,
@@ -491,6 +493,40 @@ func _run() -> void:
 			},
 		],
 	}
+	var target_count_before_unsupported := _attack_target_events.size()
+	var cancel_count_before_unsupported := _card_selection_cancel_events.size()
+	board.render_snapshot(unsupported_card_selection_snapshot)
+	for candidate_zone in board.opponent_monster_zones:
+		if candidate_zone.target_highlight.visible:
+			_fail("混合候选不受支持时不得保留任何可映射子集高亮")
+			return
+	if (
+		board.action_box.visible
+		or board.action_box.get_child_count() != 0
+		or board.status_label.text
+			!= "当前卡牌选择上下文尚未支持：候选无法完整映射为攻击目标"
+	):
+		_fail("混合候选不受支持时必须只显示中文诊断，不能显示“取消攻击”")
+		return
+	board.opponent_monster_zones[0].card_selected.emit(opponent_monster_0)
+	board.opponent_monster_zones[2].card_selected.emit(opponent_monster_2)
+	board._emit_card_selection_cancel()
+	if (
+		_attack_target_events.size() != target_count_before_unsupported
+		or _card_selection_cancel_events.size() != cancel_count_before_unsupported
+	):
+		_fail("不受支持的混合候选点击与取消不得发出攻击语义信号")
+		return
+
+	var card_selection_snapshot := unsupported_card_selection_snapshot.duplicate(true)
+	card_selection_snapshot.attack_target_context_supported = true
+	card_selection_snapshot.selection_cancelable = false
+	card_selection_snapshot.card_options = [{
+		"index": 8,
+		"controller": 1,
+		"location": 4,
+		"sequence": 2,
+	}]
 	board.render_snapshot(card_selection_snapshot)
 	for sequence in range(board.opponent_monster_zones.size()):
 		var target_highlight: Panel = board.opponent_monster_zones[sequence].target_highlight
@@ -684,6 +720,7 @@ func _run() -> void:
 	board.render_snapshot({
 		"decision_kind": "yes_no",
 		"decision_description": 31,
+		"attack_target_context_supported": true,
 		"local_player_turn": true,
 		"opponent_monsters": [hidden_opponent_monster],
 	})
@@ -705,6 +742,7 @@ func _run() -> void:
 		return
 	board.render_snapshot({
 		"decision_kind": "select_card",
+		"attack_target_context_supported": true,
 		"local_player_turn": true,
 		"selection_min": 1,
 		"selection_max": 1,

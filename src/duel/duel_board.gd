@@ -174,10 +174,25 @@ func _render_rule_decision(snapshot: Dictionary) -> void:
 	if !_local_player_turn:
 		return
 	var kind := str(snapshot.get("decision_kind", "none"))
-	if kind == "yes_no" and int(snapshot.get("decision_description", 0)) == 31:
+	var attack_context_supported := bool(
+		snapshot.get("attack_target_context_supported", false)
+	)
+	if (
+		kind == "yes_no"
+		and int(snapshot.get("decision_description", 0)) == 31
+		and attack_context_supported
+	):
 		_show_attack_route_choice()
-	elif kind == "select_card":
+	elif kind == "select_card" and attack_context_supported:
 		_show_card_options(snapshot)
+	elif kind == "select_card":
+		# pending 仍由 OCGCore 持有；这里只明确说明当前界面没有安全的攻击语义，
+		# 不创建高亮、取消入口或任何可提交信号，避免把效果选择伪装成攻击目标。
+		show_status("当前卡牌选择上下文尚未支持：候选无法完整映射为攻击目标")
+	elif kind == "yes_no" and int(snapshot.get("decision_description", 0)) == 31:
+		# 描述 31 只有 Main 保存了本地攻击来源时才是攻击路线；来源缺失时既不能
+		# 显示攻击入口，也不能降级成通用 YesNo，因为 Main 会拒绝这类伪入口。
+		return
 	elif kind == "yes_no":
 		_open_yes_no_prompt(int(snapshot.get("decision_description", 0)))
 

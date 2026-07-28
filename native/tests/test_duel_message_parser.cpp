@@ -181,6 +181,20 @@ void test_yes_no_rejects_invalid_player_and_truncated_description() {
 			== "是/否选择消息长度不足，无法安全解析");
 }
 
+void test_yes_no_rejects_trailing_bytes_without_publishing_description() {
+	std::vector<std::uint8_t> yes_no{MSG_SELECT_YESNO, 0};
+	append_little_endian<std::uint64_t>(yes_no, 31);
+	yes_no.push_back(0xff);
+	const std::vector<std::uint8_t> stream = framed(yes_no);
+
+	const ygo::PendingAction pending =
+			ygo::parse_pending_action(stream.data(), stream.size());
+	assert(pending.kind == ygo::PendingActionKind::Malformed);
+	assert(pending.description == 0);
+	assert(pending.message
+			== "是/否选择消息含有尾随字节，无法安全解析");
+}
+
 void test_select_card_exposes_single_card_candidates() {
 	std::vector<std::uint8_t> select{MSG_SELECT_CARD, 0, 1};
 	append_little_endian<std::uint32_t>(select, 1);
@@ -502,6 +516,7 @@ int main() {
 	test_truncated_frame_is_reported_as_malformed();
 	test_yes_no_message_exposes_player_and_description();
 	test_yes_no_rejects_invalid_player_and_truncated_description();
+	test_yes_no_rejects_trailing_bytes_without_publishing_description();
 	test_select_card_exposes_single_card_candidates();
 	test_select_card_rejects_invalid_protocol_fields_without_candidates();
 	test_select_card_rejects_impossible_candidate_count_before_allocation();

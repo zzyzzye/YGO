@@ -89,9 +89,11 @@ func _responsive_scenarios() -> Array[Dictionary]:
 	var direct_attack := _maximum_snapshot()
 	direct_attack["decision_kind"] = "yes_no"
 	direct_attack["decision_description"] = 31
+	direct_attack["attack_target_context_supported"] = true
 
 	var five_targets := _maximum_snapshot()
 	five_targets["decision_kind"] = "select_card"
+	five_targets["attack_target_context_supported"] = true
 	five_targets["selection_min"] = 1
 	five_targets["selection_max"] = 1
 	five_targets["selection_cancelable"] = false
@@ -103,6 +105,7 @@ func _responsive_scenarios() -> Array[Dictionary]:
 
 	var cancelable_targets := _maximum_snapshot()
 	cancelable_targets["decision_kind"] = "select_card"
+	cancelable_targets["attack_target_context_supported"] = true
 	cancelable_targets["selection_min"] = 1
 	cancelable_targets["selection_max"] = 1
 	cancelable_targets["selection_cancelable"] = true

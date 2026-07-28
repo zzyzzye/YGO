@@ -272,6 +272,17 @@ ygo::PendingAction parse_yes_no_message(
 			|| !reader.read_u64(description)) {
 		return malformed_yes_no_message();
 	}
+	// MSG_SELECT_YESNO 的正文固定为消息类型、玩家和 64 位描述共 10 字节；
+	// 任意尾随内容都表示当前帧不符合协议，必须在发布 description 前整帧拒绝。
+	if (reader.remaining() != 0) {
+		return {
+				ygo::PendingActionKind::Malformed,
+				-1,
+				false,
+				MSG_SELECT_YESNO,
+				"是/否选择消息含有尾随字节，无法安全解析",
+		};
+	}
 	if (player > 1) {
 		return {
 				ygo::PendingActionKind::Malformed,
