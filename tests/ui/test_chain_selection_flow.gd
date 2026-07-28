@@ -73,11 +73,11 @@ class FakeBridge:
 					"graveyard": 0,
 					"banished": 0,
 					"hand_cards": [
-						_card(110001, 0, 2, 0, "测试手牌甲"),
-						_card(110002, 0, 2, 1, "测试手牌乙"),
+						_card(110001, 2, 0, "测试手牌甲"),
+						_card(110002, 2, 1, "测试手牌乙"),
 					],
-					"monster_cards": [_card(120001, 0, 4, 0, "己方怪兽")],
-					"spell_trap_cards": [_card(130001, 0, 8, 1, "己方魔陷")],
+					"monster_cards": [_card(120001, 4, 0, "己方怪兽")],
+					"spell_trap_cards": [_card(130001, 8, 1, "己方魔陷")],
 				},
 				"p2": {
 					"lp": 8000,
@@ -87,7 +87,7 @@ class FakeBridge:
 					"graveyard": 0,
 					"banished": 0,
 					"hand_cards": [],
-					"monster_cards": [_card(220001, 1, 4, 2, "对手怪兽")],
+					"monster_cards": [_card(220001, 4, 2, "对手怪兽")],
 					# 对手里侧魔陷的真实身份不会进入 Godot；公开位置仍足以映射候选。
 					"spell_trap_cards": [{"sequence": 3}],
 				},
@@ -224,14 +224,12 @@ class FakeBridge:
 
 	func _card(
 		card_id: int,
-		controller: int,
 		location: int,
 		sequence: int,
 		card_name: String
 	) -> Dictionary:
 		return {
 			"card_id": card_id,
-			"controller": controller,
 			"location": location,
 			"sequence": sequence,
 			"cn_name": card_name,
@@ -265,20 +263,38 @@ func _test_all_locations_and_same_card_effects() -> bool:
 	var fake := FakeBridge.new()
 	var main = await _mount_main(fake)
 	var board: DuelBoard = main.board
+	var candidate_hand_card: CardView = board.player_hand.get_child(0)
+	var non_candidate_hand_card: CardView = board.player_hand.get_child(1)
 	if !_check(
 		board._rule_decision_kind == "select_chain"
 			and _is_hand_chainable(board.player_hand, 0)
 			and !_is_hand_chainable(board.player_hand, 1)
+			and !candidate_hand_card.card_data.has("controller")
+			and candidate_hand_card.self_modulate.is_equal_approx(
+				candidate_hand_card.get_theme_color(
+					&"candidate_modulate",
+					&"ChainCandidateHand"
+				)
+			)
+			and non_candidate_hand_card.self_modulate.is_equal_approx(
+				non_candidate_hand_card.get_theme_color(
+					&"non_candidate_modulate",
+					&"ChainCandidateHand"
+				)
+			)
+			and !candidate_hand_card.self_modulate.is_equal_approx(
+				non_candidate_hand_card.self_modulate
+			)
 			and _is_zone_chainable(board.player_monster_zones[0])
 			and _is_zone_chainable(board.player_spell_zones[1])
 			and _is_zone_chainable(board.opponent_monster_zones[2])
 			and _is_zone_chainable(board.opponent_spell_zones[3])
 			and _button_texts(board.action_box) == ["不连锁"],
-		"完整映射后必须高亮手牌、己方两类场区及可定位对手场区，并保留不连锁"
+		"真实无 controller 手牌必须可映射，且候选/非候选 CardView 必须呈现不同明暗"
 	):
 		return false
 
-	var hand_card: CardView = board.player_hand.get_child(0)
+	var hand_card: CardView = candidate_hand_card
 	hand_card.pressed.emit()
 	if !_check(
 		_button_texts(board.action_box) == [
@@ -463,8 +479,9 @@ func _test_failure_retry_and_stale_generation() -> bool:
 	if !_check(
 		fake.method_calls("submit_chain").size() == 2
 			and _is_hand_chainable(board.player_hand, 0)
+			and board._rule_decision_generation == stale_generation
 			and "OCGCore 拒绝了响应，请重新选择" in board.status_label.text,
-		"MSG_RETRY 必须按同一 pending 恢复完整连锁入口"
+		"MSG_RETRY 必须按同一 pending 和同一决策代次恢复完整连锁入口"
 	):
 		return false
 
@@ -479,8 +496,9 @@ func _test_failure_retry_and_stale_generation() -> bool:
 	if !_check(
 		fake.method_calls("submit_chain").size() == 3
 			and str(fake.pending.kind) == "select_chain"
-			and int(fake.pending.chain_options[0].index) == 70,
-		"同步重入只能提交一次，成功后应进入下一份同形连锁决策"
+			and int(fake.pending.chain_options[0].index) == 70
+			and board._rule_decision_generation == current_generation + 1,
+		"同步重入只能提交一次，成功后的下一份同形决策必须使用新代次"
 	):
 		return false
 
@@ -609,7 +627,15 @@ func _unmount_main(main) -> void:
 func _is_hand_chainable(hand: HandView, sequence: int) -> bool:
 	for child in hand.get_children():
 		if child is CardView and int(child.card_data.get("sequence", -1)) == sequence:
-			return hand._chain_candidate_sequences.has(sequence)
+			return (
+				hand._chain_candidate_sequences.has(sequence)
+				and child.self_modulate.is_equal_approx(
+					child.get_theme_color(
+						&"candidate_modulate",
+						&"ChainCandidateHand"
+					)
+				)
+			)
 	return false
 
 

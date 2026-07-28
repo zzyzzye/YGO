@@ -101,7 +101,11 @@ func _build_deck_ids(source_ids: PackedInt64Array, duel_seed: int) -> PackedInt6
 	return deck
 
 
-func _refresh_board(status_text: String, pending_override: Dictionary = {}) -> void:
+func _refresh_board(
+	status_text: String,
+	pending_override: Dictionary = {},
+	preserve_decision_generation := false
+) -> void:
 	var state: Dictionary = bridge.call("get_duel_state")
 	# Retry 响应已经携带 Session 恢复后的决策，优先采用同一次调用的返回值，
 	# 避免额外查询与后续自动推进之间出现观察时序差异。
@@ -217,7 +221,7 @@ func _refresh_board(status_text: String, pending_override: Dictionary = {}) -> v
 			opponent_state.hand,
 		],
 	}
-	board.render_snapshot(snapshot)
+	board.render_snapshot(snapshot, preserve_decision_generation)
 	if (
 		!game_over
 		and _current_attack_target_context_supported
@@ -388,7 +392,8 @@ func _on_position_requested(
 	if bool(response.get("response_rejected", false)):
 		_refresh_board(
 			"OCGCore 拒绝了响应，请重新选择",
-			response.get("pending_action", {})
+			response.get("pending_action", {}),
+			true
 		)
 		return
 	_refresh_board("表示形式已提交，场面已由 OCGCore 更新")
@@ -487,7 +492,8 @@ func _restore_rejected_response(response: Dictionary) -> bool:
 	var preview_before_refresh := _pending_attack_target_preview.duplicate()
 	_refresh_board(
 		"OCGCore 拒绝了响应，请重新选择",
-		response.get("pending_action", {})
+		response.get("pending_action", {}),
+		true
 	)
 	# 路线 YesNo(false) 的怪兽预选需要跨过 Retry 后再次提交；常规刷新会
 	# 因当前仍是 ROUTE 而清空它，所以只在结构化拒绝分支恢复这份位置。

@@ -147,10 +147,11 @@ func _configure_zone_row(zones: Array, prefix: String) -> void:
 		zones[index].configure("%s %s" % [prefix, index + 1])
 
 
-func render_snapshot(snapshot: Dictionary) -> void:
+func render_snapshot(snapshot: Dictionary, preserve_decision_generation := false) -> void:
 	# 所有高亮和动态决策按钮都绑定上一份 OCGCore 快照；读取任何新字段前先
-	# 原子清除旧表现，终局或无决策快照就不会残留可点击目标。
-	_clear_rule_decision_presentation()
+	# 原子清除旧表现，终局或无决策快照就不会残留可点击目标。MSG_RETRY
+	# 仍属于同一次规则决策，重建节点时保留代次；正常推进才让旧信号整体失效。
+	_clear_rule_decision_presentation(preserve_decision_generation)
 	current_actions = snapshot.get("idle_actions", [])
 	_local_player_turn = bool(snapshot.get("local_player_turn", false))
 	_can_end_turn = bool(snapshot.get("can_end_turn", false))
@@ -380,8 +381,9 @@ func _emit_position(selected_position: int, decision_generation: int) -> void:
 		position_requested.emit(selected_position, decision_generation)
 
 
-func _clear_rule_decision_presentation() -> void:
-	_rule_decision_generation += 1
+func _clear_rule_decision_presentation(preserve_decision_generation := false) -> void:
+	if !preserve_decision_generation:
+		_rule_decision_generation += 1
 	_rule_decision_kind = "none"
 	_card_selection_cancelable = false
 	_card_option_indices.clear()
@@ -428,6 +430,30 @@ func _rule_location(data: Dictionary) -> Dictionary:
 		"controller": int(data.get("controller", -1)),
 		"location": int(data.get("location", -1)),
 		"sequence": int(data.get("sequence", -1)),
+	}
+
+
+func _local_rule_location(card_data: Dictionary, source_zone: ZoneView) -> Dictionary:
+	# 原生公开卡快照只携带 location/sequence，不重复输出 controller。己方
+	# controller=0 必须由可信的信号来源补齐：空来源只代表 PlayerHand，场区
+	# 来源则必须是本面板持有的己方怪兽区或魔陷区。这样既不扩大 Bridge 的
+	# 公开卡契约，也不会相信卡数据里可能被伪造的 controller/location。
+	var expected_location := 2
+	if source_zone in player_monster_zones:
+		expected_location = 4
+	elif source_zone in player_spell_zones:
+		expected_location = 8
+	elif source_zone != null:
+		return {}
+	if int(card_data.get("location", -1)) != expected_location:
+		return {}
+	var sequence := int(card_data.get("sequence", -1))
+	if sequence < 0:
+		return {}
+	return {
+		"controller": 0,
+		"location": expected_location,
+		"sequence": sequence,
 	}
 
 
@@ -510,7 +536,7 @@ func _on_card_selected(card_data: Dictionary, source_zone: ZoneView = null) -> v
 		_unlock_selection()
 		return
 	if _rule_decision_kind == "select_chain":
-		_select_chain_card(_rule_location(card_data), card_data, source_zone)
+		_select_chain_card(_local_rule_location(card_data, source_zone), card_data, source_zone)
 		return
 	selected_card = card_data
 	if source_zone != null and player_hand != null:
