@@ -14,6 +14,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <filesystem>
 
 namespace {
 
@@ -24,6 +25,49 @@ void require(const bool condition, const char *message) {
 	std::fprintf(stderr, "PendingAction Godot 适配器契约失败：%s\n", message);
 	std::abort();
 }
+
+} // namespace
+
+namespace ygo {
+
+// 受控夹具仅借助测试专用 friend 构造不会调用 OCGCore 的状态门禁输入。它不导出
+// Godot 方法，也不接受原始响应；真实候选提交仍由上方集成测试覆盖。
+struct YgoCoreBridgeTestAccess final {
+	static DuelSession &install_controlled_session(YgoCoreBridge &bridge) {
+		bridge.session_ = std::make_unique<DuelSession>(nullptr, nullptr);
+		return *bridge.session_;
+	}
+
+	static void set_active(DuelSession &session) {
+		session.duel_ = reinterpret_cast<void *>(static_cast<std::uintptr_t>(1));
+	}
+
+	static void set_pending_place(
+			DuelSession &session,
+			const int player,
+			const int winner) {
+		session.pending_action_.kind = PendingActionKind::SelectPlace;
+		session.pending_action_.player = player;
+		// 受控门禁用例提交 sequence=3，而快照只允许 4；若未来有人错误绕过
+		// Bridge 的玩家/终局门禁，Session 仍会在写入 OCGCore 前拒绝该值，
+		// 避免伪活动句柄被触发，同时让测试观察到错误的错误路径。
+		session.pending_action_.place_options = {{0, LOCATION_MZONE, 4}};
+		session.winner_ = winner;
+	}
+
+	static const PendingAction &pending(const DuelSession &session) {
+		return session.pending_action_;
+	}
+
+	static void remove_controlled_session(YgoCoreBridge &bridge) {
+		bridge.session_->duel_ = nullptr;
+		bridge.session_.reset();
+	}
+};
+
+} // namespace ygo
+
+namespace {
 
 std::int64_t read_int(
 		const godot::Dictionary &dictionary,
@@ -162,6 +206,174 @@ void test_place_selection_dictionary_uses_semantic_kind() {
 			"对手区域候选必须按控制者、区域和序号完整发布");
 }
 
+void test_bridge_submits_only_current_place_option_to_real_session() {
+	// 此测试刻意经由 Godot 已绑定的 Bridge API 驱动真实 OCGCore，而不是直接
+	// 调用 DuelSession：它要捕获 Bridge 误传三元组、跳过快照校验或擅自改写
+	// pending 的回归。测试源码位于 native/tests，向上三级稳定回到项目根目录。
+	const std::filesystem::path project_root =
+			std::filesystem::path(__FILE__).parent_path().parent_path().parent_path();
+	const std::string project_root_utf8 = project_root.string();
+
+	godot::Ref<ygo::YgoCoreBridge> bridge;
+	bridge.instantiate();
+	require(bridge.is_valid(), "Bridge 真实区域选择测试实例创建失败");
+	const godot::Dictionary initialized =
+			bridge->initialize_card_database(godot::String::utf8(project_root_utf8.c_str()));
+	require(static_cast<bool>(initialized["ok"]), "Bridge 必须初始化真实离线卡片数据库");
+
+	const godot::PackedInt64Array deck = bridge->get_scripted_card_ids();
+	require(deck.size() == 40, "真实区域选择测试必须取得完整 40 张离线牌组");
+	const godot::Dictionary setup = bridge->setup_duel(deck, deck, 0x59474f);
+	require(static_cast<bool>(setup["ok"]), "Bridge 必须成功启动真实离线决斗");
+
+	const godot::Dictionary idle = bridge->get_pending_action();
+	require(
+			static_cast<godot::String>(idle["kind"]) == godot::String("idle"),
+			"真实离线决斗必须先停在本地空闲决策");
+	const godot::Array idle_actions = idle["idle_actions"];
+	std::int64_t normal_summon_index = -1;
+	for (std::int64_t index = 0; index < idle_actions.size(); ++index) {
+		const godot::Dictionary action = idle_actions[index];
+		if (static_cast<godot::String>(action["action_kind"])
+				== godot::String("normal_summon")) {
+			normal_summon_index = read_int(action, "index");
+			break;
+		}
+	}
+	require(normal_summon_index >= 0, "真实离线决斗必须提供通常召唤候选");
+
+	const godot::Dictionary started_selection =
+			bridge->submit_idle_action(godot::String("normal_summon"), normal_summon_index);
+	require(static_cast<bool>(started_selection["ok"]), "通常召唤必须推进到区域选择");
+	const godot::Dictionary before_forgery = started_selection["pending_action"];
+	require(
+			static_cast<godot::String>(before_forgery["kind"])
+					== godot::String("select_place"),
+			"通常召唤必须由 Bridge 暴露真实 SelectPlace 决策");
+	const godot::Array place_options = before_forgery["place_options"];
+	require(place_options.size() > 1, "区域选择必须提供多个真实候选");
+
+	// 255 属于 uint8 范围，却不属于真实候选；因此失败必须来自 Session 的
+	// 快照匹配，而不是 Bridge 的范围门禁。pending 仍须完整保留给界面重试。
+	const godot::Dictionary forged = bridge->submit_place(0, LOCATION_MZONE, 255);
+	require(!static_cast<bool>(forged["ok"]), "伪造但未越界的区域三元组必须被拒绝");
+	const godot::Dictionary rejected_pending = forged["pending_action"];
+	require(
+			static_cast<godot::String>(rejected_pending["kind"])
+					== godot::String("select_place"),
+			"伪造区域被拒绝后必须保留 SelectPlace 决策");
+	const godot::Array rejected_options = rejected_pending["place_options"];
+	require(
+			rejected_options.size() == place_options.size(),
+			"伪造区域被拒绝后候选数量不得变化");
+	for (std::int64_t index = 0; index < place_options.size(); ++index) {
+		const godot::Dictionary expected = place_options[index];
+		const godot::Dictionary actual = rejected_options[index];
+		require(
+				read_int(actual, "controller") == read_int(expected, "controller")
+						&& read_int(actual, "location") == read_int(expected, "location")
+						&& read_int(actual, "sequence") == read_int(expected, "sequence"),
+				"伪造区域被拒绝后候选三元组不得重排或被改写");
+	}
+	require(
+			static_cast<godot::String>(bridge->get_pending_action()["kind"])
+					== godot::String("select_place"),
+			"伪造区域被拒绝后当前 Bridge 快照不得推进");
+
+	std::int64_t chosen_controller = -1;
+	std::int64_t chosen_location = -1;
+	std::int64_t chosen_sequence = -1;
+	for (std::int64_t index = 1; index < place_options.size(); ++index) {
+		const godot::Dictionary option = place_options[index];
+		if (read_int(option, "controller") == 0
+				&& read_int(option, "location") == LOCATION_MZONE
+				&& read_int(option, "sequence") == 3) {
+			chosen_controller = read_int(option, "controller");
+			chosen_location = read_int(option, "location");
+			chosen_sequence = read_int(option, "sequence");
+			break;
+		}
+	}
+	require(
+			chosen_sequence == 3,
+			"真实区域选择必须允许提交非首项的本地怪兽区序号 3");
+	const godot::Dictionary accepted = bridge->submit_place(
+			chosen_controller, chosen_location, chosen_sequence);
+	require(static_cast<bool>(accepted["ok"]), "合法非首区域候选必须被 Bridge 提交");
+
+	// 通常召唤可能紧接着要求表示形式；仍须通过 Bridge 消费它，才能在真实
+	// 场面中观察 OCGCore 已采用的 sequence，而非凭返回结果推测提交成功。
+	godot::Dictionary after_place = accepted["pending_action"];
+	if (static_cast<godot::String>(after_place["kind"])
+			== godot::String("select_position")) {
+		const godot::Array positions = after_place["position_options"];
+		require(!positions.is_empty(), "表示形式决策必须包含真实候选");
+		const godot::Dictionary positioned =
+				bridge->submit_position(static_cast<std::int64_t>(positions[0]));
+		require(static_cast<bool>(positioned["ok"]), "合法表示形式候选必须被提交");
+	}
+	const godot::Dictionary state = bridge->get_duel_state();
+	require(static_cast<bool>(state["ok"]), "提交区域后必须能读取真实决斗状态");
+	const godot::Dictionary players = state["players"];
+	const godot::Dictionary local_player = players["p1"];
+	const godot::Array monster_cards = local_player["monster_cards"];
+	bool placed_at_selected_sequence = false;
+	for (std::int64_t index = 0; index < monster_cards.size(); ++index) {
+		const godot::Dictionary card = monster_cards[index];
+		if (read_int(card, "sequence") == chosen_sequence) {
+			placed_at_selected_sequence = true;
+			break;
+		}
+	}
+	require(
+			placed_at_selected_sequence,
+			"合法非首区域候选必须更新真实场面的对应序号");
+	bridge->destroy_duel();
+}
+
+void test_bridge_place_gates_nonlocal_and_finished_controlled_session() {
+	// Bridge 的 advance_to_local_decision 会把公开单机流程中的对手决策自动处理，
+	// 因而不能稳定停在 player=1；终局也不能通过固定牌组在短测试内可靠重现。
+	// 这里仅构造 Session 已有字段的受控快照，验证 Bridge 在调用 submit_place 前
+	// 拒绝这两种状态，且不触碰 pending。伪指针只让 is_active() 为真，两个分支
+	// 都在触达 OCGCore 前返回，离开前会清空以避免析构时释放非核心句柄。
+	godot::Ref<ygo::YgoCoreBridge> bridge;
+	bridge.instantiate();
+	require(bridge.is_valid(), "Bridge 受控区域门禁测试实例创建失败");
+	ygo::DuelSession &session =
+			ygo::YgoCoreBridgeTestAccess::install_controlled_session(*bridge.operator->());
+	ygo::YgoCoreBridgeTestAccess::set_active(session);
+	ygo::YgoCoreBridgeTestAccess::set_pending_place(session, 1, -1);
+
+	const godot::Dictionary nonlocal = bridge->submit_place(0, LOCATION_MZONE, 3);
+	require(!static_cast<bool>(nonlocal["ok"]), "非本地待决玩家不得提交区域");
+	require(
+			static_cast<godot::String>(nonlocal["message"])
+					== godot::String::utf8("当前不是本地玩家的操作回合"),
+			"非本地待决玩家必须返回中文门禁错误");
+	require(
+			ygo::YgoCoreBridgeTestAccess::pending(session).kind
+					== ygo::PendingActionKind::SelectPlace
+					&& ygo::YgoCoreBridgeTestAccess::pending(session).player == 1
+					&& ygo::YgoCoreBridgeTestAccess::pending(session).place_options.size() == 1,
+			"非本地门禁拒绝后 pending 不得推进或丢失候选");
+
+	ygo::YgoCoreBridgeTestAccess::set_pending_place(session, 0, 0);
+	const godot::Dictionary finished = bridge->submit_place(0, LOCATION_MZONE, 3);
+	require(!static_cast<bool>(finished["ok"]), "终局决斗不得提交区域");
+	require(
+			static_cast<godot::String>(finished["message"])
+					== godot::String::utf8("决斗已经结束，不能继续提交动作"),
+			"终局提交必须返回中文门禁错误");
+	require(
+			ygo::YgoCoreBridgeTestAccess::pending(session).kind
+					== ygo::PendingActionKind::SelectPlace
+					&& ygo::YgoCoreBridgeTestAccess::pending(session).player == 0
+					&& ygo::YgoCoreBridgeTestAccess::pending(session).place_options.size() == 1,
+			"终局门禁拒绝后 pending 不得推进或丢失候选");
+	ygo::YgoCoreBridgeTestAccess::remove_controlled_session(*bridge.operator->());
+}
+
 void test_chain_dictionary_contract_hides_opponent_facedown_identity() {
 	// OCGCore 卡片脚本常用 Stringid(card_id, effect_id)，其高位可直接还原卡号。
 	// 因此对手里侧候选必须同时隐藏 card_id 与 description；仅隐藏前者仍会泄密。
@@ -295,6 +507,8 @@ void run_contract_tests() {
 	test_card_selection_hides_opponent_facedown_identity();
 	test_position_selection_dictionary_contract();
 	test_place_selection_dictionary_uses_semantic_kind();
+	test_bridge_submits_only_current_place_option_to_real_session();
+	test_bridge_place_gates_nonlocal_and_finished_controlled_session();
 	test_chain_dictionary_contract_hides_opponent_facedown_identity();
 	test_bridge_rejects_negative_selection_before_narrowing();
 	std::fprintf(stdout, "PendingAction Godot 适配器契约测试通过\n");

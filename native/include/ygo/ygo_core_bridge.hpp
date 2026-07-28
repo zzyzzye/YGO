@@ -15,6 +15,10 @@
 
 namespace ygo {
 
+// 仅用于原生契约测试构造 Bridge 层在公开单机流程中不可稳定复现的状态门禁。
+// 它不是 Godot ClassDB 接口，也不提供 OCGCore 原始响应访问能力。
+struct YgoCoreBridgeTestAccess;
+
 class YgoCoreBridge final : public godot::RefCounted {
 	GDCLASS(YgoCoreBridge, godot::RefCounted)
 
@@ -87,6 +91,7 @@ protected:
 	static void _bind_methods();
 
 private:
+	friend struct YgoCoreBridgeTestAccess;
 	// OCGCore 通过回调借用卡库和脚本加载器，因此两者必须比 DuelSession 活得更久。
 	// 成员声明顺序配合显式重置顺序，保证活动决斗总是最先被销毁。
 	std::shared_ptr<CardDatabase> database_;
