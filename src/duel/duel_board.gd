@@ -9,6 +9,11 @@ signal enter_main2_requested
 signal end_battle_requested
 signal restart_requested
 signal exit_requested
+signal direct_attack_requested
+signal attack_target_preview_requested(location: Dictionary)
+signal attack_target_requested(option_index: int)
+signal card_selection_cancel_requested
+signal yes_no_requested(accepted: bool)
 
 var player_monster_zones: Array = []
 var player_spell_zones: Array = []
@@ -29,7 +34,9 @@ var opponent_spell_zones: Array = []
 @onready var phase_button: Button = %PhaseButton
 @onready var debug_overlay: Label = %DebugOverlay
 @onready var player_stats_label: Label = %PlayerStatus
+@onready var opponent_status_surface: Control = %OpponentStatusSurface
 @onready var opponent_stats_label: Label = %OpponentStatus
+@onready var direct_attack_highlight: Panel = %DirectAttackHighlight
 @onready var confirmation_overlay: PanelContainer = %ConfirmationOverlay
 @onready var confirmation_label: Label = %ConfirmationLabel
 @onready var confirmation_buttons: HBoxContainer = %ConfirmationButtons
@@ -46,6 +53,10 @@ var _phase_kind := "idle"
 var _can_enter_battle := false
 var _can_enter_main2 := false
 var _can_end_battle := false
+var _rule_decision_kind := "none"
+# key 只由 OCGCore 公开的 controller/location/sequence 组成，值是同一决策帧中的
+# 候选 index；卡号不参与映射，避免同名卡或隐藏身份影响规则位置选择。
+var _card_option_indices: Dictionary = {}
 
 
 func _ready() -> void:
@@ -98,8 +109,10 @@ func _ready() -> void:
 		zone.card_selected.connect(_on_card_selected.bind(zone))
 		zone.card_hovered.connect(_preview_card)
 		zone.card_unhovered.connect(_on_card_unhovered)
-	# 对手区域只允许预览。规则层不会为它们暴露可提交动作，界面也不连接选择信号，
-	# 防止未来的卡片脚本变化绕过 OCGCore 候选动作门禁。
+	# 对手怪兽始终连接同一个选择路由；路由只在当前 OCGCore 决策允许时发出
+	# “请求进入目标选择”或“提交候选索引”，普通浏览状态不会产生规则动作。
+	for zone in opponent_monster_zones:
+		zone.card_selected.connect(_route_opponent_monster_selection.bind(zone))
 	for zone in opponent_monster_zones + opponent_spell_zones:
 		zone.card_hovered.connect(_preview_card)
 		zone.card_unhovered.connect(_on_card_unhovered)
@@ -108,6 +121,7 @@ func _ready() -> void:
 	restart_button.pressed.connect(_request_restart)
 	debug_button.pressed.connect(_toggle_debug)
 	exit_button.pressed.connect(_request_exit)
+	opponent_status_surface.gui_input.connect(_on_opponent_status_input)
 	%Background.gui_input.connect(_on_background_input)
 
 
@@ -117,6 +131,9 @@ func _configure_zone_row(zones: Array, prefix: String) -> void:
 
 
 func render_snapshot(snapshot: Dictionary) -> void:
+	# 所有高亮和动态决策按钮都绑定上一份 OCGCore 快照；读取任何新字段前先
+	# 原子清除旧表现，终局或无决策快照就不会残留可点击目标。
+	_clear_rule_decision_presentation()
 	current_actions = snapshot.get("idle_actions", [])
 	_local_player_turn = bool(snapshot.get("local_player_turn", false))
 	_can_end_turn = bool(snapshot.get("can_end_turn", false))
@@ -126,7 +143,6 @@ func render_snapshot(snapshot: Dictionary) -> void:
 	_can_end_battle = bool(snapshot.get("can_end_battle", false))
 	# 阶段选项绑定的是上一份 OCGCore 决策快照。任何新快照到达后都必须
 	# 立即失效，避免玩家在卡牌动作完成后继续点击旧阶段按钮。
-	_close_confirmation()
 	_clear_selection()
 	player_hand.render_cards(snapshot.get("player_hand", []), false)
 	var opponent_cards: Array = []
@@ -147,6 +163,116 @@ func render_snapshot(snapshot: Dictionary) -> void:
 	_render_zone_cards(player_spell_zones, snapshot.get("player_spells", []))
 	_render_zone_cards(opponent_monster_zones, snapshot.get("opponent_monsters", []))
 	_render_zone_cards(opponent_spell_zones, snapshot.get("opponent_spells", []))
+	_render_rule_decision(snapshot)
+
+
+func _render_rule_decision(snapshot: Dictionary) -> void:
+	# 非本地玩家或终局快照即使携带 OCGCore 最后一帧决策，也只能展示场面，
+	# 不得暴露可点击入口。
+	if !_local_player_turn:
+		return
+	var kind := str(snapshot.get("decision_kind", "none"))
+	if kind == "yes_no" and int(snapshot.get("decision_description", 0)) == 31:
+		_show_attack_route_choice()
+	elif kind == "select_card":
+		_show_card_options(snapshot)
+	elif kind == "yes_no":
+		_open_yes_no_prompt(int(snapshot.get("decision_description", 0)))
+
+
+func _show_attack_route_choice() -> void:
+	_rule_decision_kind = "attack_route"
+	direct_attack_highlight.visible = true
+	# 这里只标记“可以请求 OCGCore 选择该怪兽”；真实合法性要等待随后返回的
+	# select_card.card_options，不能根据当前场面自行推断。
+	for zone in opponent_monster_zones:
+		zone.set_attack_target_preview(zone.card_container.get_child_count() > 0)
+	show_status("点击对手 LP 直接攻击，或点击怪兽选择目标")
+
+
+func _show_card_options(snapshot: Dictionary) -> void:
+	if (
+		int(snapshot.get("selection_min", 0)) != 1
+		or int(snapshot.get("selection_max", 0)) != 1
+	):
+		return
+	_rule_decision_kind = "select_card"
+	for option in snapshot.get("card_options", []):
+		var location := _rule_location(option)
+		var zone := _find_opponent_monster_zone(location)
+		if zone == null:
+			continue
+		var key := _rule_location_key(location)
+		_card_option_indices[key] = int(option.get("index", -1))
+		zone.set_targetable(true)
+	if bool(snapshot.get("selection_cancelable", false)):
+		var cancel := Button.new()
+		cancel.text = "取消攻击"
+		cancel.pressed.connect(_emit_card_selection_cancel)
+		action_box.add_child(cancel)
+		action_box.visible = true
+
+
+func _open_yes_no_prompt(description: int) -> void:
+	_rule_decision_kind = "yes_no"
+	_confirmation_kind = "rule_yes_no"
+	confirmation_label.text = "请选择是或否（规则描述 %s）" % description
+	_clear_confirmation_buttons()
+	for option in [
+		{"accepted": true, "text": "是"},
+		{"accepted": false, "text": "否"},
+	]:
+		var button := Button.new()
+		button.text = str(option.text)
+		button.pressed.connect(_emit_yes_no.bind(bool(option.accepted)))
+		confirmation_buttons.add_child(button)
+	confirmation_overlay.visible = true
+
+
+func _clear_rule_decision_presentation() -> void:
+	_rule_decision_kind = "none"
+	_card_option_indices.clear()
+	direct_attack_highlight.visible = false
+	for zone in opponent_monster_zones:
+		zone.set_attack_target_preview(false)
+		zone.set_targetable(false)
+	_clear_dynamic_children(action_box)
+	action_box.visible = false
+	_close_confirmation()
+
+
+func _find_opponent_monster_zone(location: Dictionary) -> ZoneView:
+	if (
+		int(location.get("controller", -1)) != 1
+		or int(location.get("location", -1)) != 4
+	):
+		return null
+	var sequence := int(location.get("sequence", -1))
+	if sequence < 0 or sequence >= opponent_monster_zones.size():
+		return null
+	var zone: ZoneView = opponent_monster_zones[sequence]
+	if zone.card_container.get_child_count() == 0:
+		return null
+	var displayed_card: CardView = zone.card_container.get_child(0)
+	if _rule_location(displayed_card.card_data) != location:
+		return null
+	return zone
+
+
+func _rule_location(data: Dictionary) -> Dictionary:
+	return {
+		"controller": int(data.get("controller", -1)),
+		"location": int(data.get("location", -1)),
+		"sequence": int(data.get("sequence", -1)),
+	}
+
+
+func _rule_location_key(location: Dictionary) -> String:
+	return "%s:%s:%s" % [
+		int(location.get("controller", -1)),
+		int(location.get("location", -1)),
+		int(location.get("sequence", -1)),
+	]
 
 
 func show_status(message: String) -> void:
@@ -173,6 +299,52 @@ func _on_card_selected(card_data: Dictionary, source_zone: ZoneView = null) -> v
 	_set_field_card_selection(source_zone)
 	_show_card_detail(card_data)
 	_rebuild_action_buttons()
+
+
+func _route_opponent_monster_selection(
+	card_data: Dictionary,
+	source_zone: ZoneView
+) -> void:
+	if card_data.is_empty():
+		return
+	var location := _rule_location(card_data)
+	if _rule_decision_kind == "attack_route":
+		if (
+			source_zone.target_highlight.visible
+			and source_zone.target_highlight.theme_type_variation == &"AttackTargetPreview"
+		):
+			attack_target_preview_requested.emit(location)
+		return
+	if _rule_decision_kind != "select_card":
+		return
+	var option_index = _card_option_indices.get(_rule_location_key(location), null)
+	if (
+		option_index != null
+		and source_zone.target_highlight.visible
+		and source_zone.target_highlight.theme_type_variation == &"TargetHighlight"
+	):
+		attack_target_requested.emit(int(option_index))
+
+
+func _on_opponent_status_input(event: InputEvent) -> void:
+	if (
+		_rule_decision_kind == "attack_route"
+		and direct_attack_highlight.visible
+		and event is InputEventMouseButton
+		and event.button_index == MOUSE_BUTTON_LEFT
+		and event.pressed
+	):
+		direct_attack_requested.emit()
+
+
+func _emit_card_selection_cancel() -> void:
+	if _rule_decision_kind == "select_card":
+		card_selection_cancel_requested.emit()
+
+
+func _emit_yes_no(accepted: bool) -> void:
+	if _rule_decision_kind == "yes_no":
+		yes_no_requested.emit(accepted)
 
 
 func _preview_card(card_data: Dictionary) -> void:

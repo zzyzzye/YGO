@@ -113,7 +113,8 @@ func _run() -> void:
 		"Background", "SafeArea", "Battlefield", "OpponentHand",
 		"OpponentSpellRow", "OpponentMonsterRow", "TurnLabel",
 		"PlayerMonsterRow", "PlayerSpellRow", "PlayerHand",
-		"OpponentStatus", "PlayerStatus", "PhaseButton", "SystemTools",
+		"OpponentStatusSurface", "OpponentStatus", "DirectAttackHighlight",
+		"PlayerStatus", "PhaseButton", "SystemTools",
 		"StatusToast", "CardDetailOverlay", "ContextActionBar",
 		"ConfirmationOverlay", "DebugOverlay", "AnimationPlayer",
 	]:
@@ -142,10 +143,36 @@ func _run() -> void:
 		):
 			_fail("系统按钮必须消费 SystemButton Theme 变体：" + system_button_name)
 			return
+	var opponent_status_surface: Control = board.find_child(
+		"OpponentStatusSurface",
+		true,
+		false
+	)
+	var opponent_status: Label = board.find_child("OpponentStatus", true, false)
+	var direct_attack_highlight: Panel = board.find_child(
+		"DirectAttackHighlight",
+		true,
+		false
+	)
+	if (
+		opponent_status.get_parent() != opponent_status_surface
+		or direct_attack_highlight.get_parent() != opponent_status_surface
+		or direct_attack_highlight.visible
+		or direct_attack_highlight.anchor_left != 0.0
+		or direct_attack_highlight.anchor_top != 0.0
+		or direct_attack_highlight.anchor_right != 1.0
+		or direct_attack_highlight.anchor_bottom != 1.0
+		or direct_attack_highlight.mouse_filter != Control.MOUSE_FILTER_IGNORE
+		or direct_attack_highlight.theme_type_variation != &"DirectAttackTarget"
+	):
+		_fail("对手 LP 必须使用原生点击面及忽略输入的全尺寸直击高亮")
+		return
 	for type_mapping in [
 		[&"ZonePanel", &"PanelContainer"],
+		[&"AttackTargetPreview", &"Panel"],
 		[&"TargetHighlight", &"Panel"],
 		[&"TargetSelectedHighlight", &"Panel"],
+		[&"DirectAttackTarget", &"Panel"],
 		[&"PhaseButton", &"Button"],
 		[&"SystemButton", &"Button"],
 	]:
@@ -355,10 +382,23 @@ func _run() -> void:
 	):
 		_fail("TargetHighlight 必须是覆盖整个 ZoneView 且忽略输入的原生覆盖层")
 		return
-	for method_name in [&"set_targetable", &"set_target_selected", &"set_card_selected"]:
+	for method_name in [
+		&"set_attack_target_preview",
+		&"set_targetable",
+		&"set_target_selected",
+		&"set_card_selected",
+	]:
 		if !zone.has_method(method_name):
 			_fail("ZoneView 缺少表现接口：" + method_name)
 			return
+	zone.set_attack_target_preview(true)
+	if (
+		!target_highlight.visible
+		or target_highlight.theme_type_variation != &"AttackTargetPreview"
+		or !duel_theme.has_stylebox(&"panel", &"AttackTargetPreview")
+	):
+		_fail("攻击目标预览必须显示 AttackTargetPreview 黑白样式")
+		return
 	zone.set_targetable(true)
 	if !target_highlight.visible or target_highlight.theme_type_variation != &"TargetHighlight":
 		_fail("可选目标必须显示 TargetHighlight 黑白样式")
@@ -383,6 +423,7 @@ func _run() -> void:
 	):
 		_fail("可选目标与已选目标必须有可见差异")
 		return
+	zone.set_attack_target_preview(false)
 	zone.set_targetable(false)
 	if target_highlight.visible:
 		_fail("取消目标状态后必须隐藏目标覆盖层")

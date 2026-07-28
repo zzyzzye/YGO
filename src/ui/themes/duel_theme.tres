@@ -1,4 +1,4 @@
-[gd_resource type="Theme" load_steps=23 format=3]
+[gd_resource type="Theme" load_steps=25 format=3]
 
 [sub_resource type="StyleBoxFlat" id="StyleCardSelection"]
 bg_color = Color(0, 0, 0, 0)
@@ -112,6 +112,18 @@ corner_radius_top_right = 6
 corner_radius_bottom_right = 6
 corner_radius_bottom_left = 6
 
+[sub_resource type="StyleBoxFlat" id="StyleAttackTargetPreview"]
+bg_color = Color(1, 1, 1, 0.025)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.72, 0.72, 0.72, 0.82)
+corner_radius_top_left = 6
+corner_radius_top_right = 6
+corner_radius_bottom_right = 6
+corner_radius_bottom_left = 6
+
 [sub_resource type="StyleBoxFlat" id="StyleTargetSelectedHighlight"]
 bg_color = Color(0, 0, 0, 0.42)
 border_width_left = 4
@@ -123,6 +135,18 @@ corner_radius_top_left = 6
 corner_radius_top_right = 6
 corner_radius_bottom_right = 6
 corner_radius_bottom_left = 6
+
+[sub_resource type="StyleBoxFlat" id="StyleDirectAttackTarget"]
+bg_color = Color(1, 1, 1, 0.1)
+border_width_left = 3
+border_width_top = 3
+border_width_right = 3
+border_width_bottom = 3
+border_color = Color(1, 1, 1, 1)
+corner_radius_top_left = 8
+corner_radius_top_right = 8
+corner_radius_bottom_right = 8
+corner_radius_bottom_left = 8
 
 [sub_resource type="StyleBoxFlat" id="StyleOverlayPanel"]
 bg_color = Color(0.03, 0.04, 0.06, 0.9)
@@ -301,10 +325,14 @@ CardSelection/base_type = &"Panel"
 CardSelection/styles/panel = SubResource("StyleCardSelection")
 ZonePanel/base_type = &"PanelContainer"
 ZonePanel/styles/panel = SubResource("StyleZonePanel")
+AttackTargetPreview/base_type = &"Panel"
+AttackTargetPreview/styles/panel = SubResource("StyleAttackTargetPreview")
 TargetHighlight/base_type = &"Panel"
 TargetHighlight/styles/panel = SubResource("StyleTargetHighlight")
 TargetSelectedHighlight/base_type = &"Panel"
 TargetSelectedHighlight/styles/panel = SubResource("StyleTargetSelectedHighlight")
+DirectAttackTarget/base_type = &"Panel"
+DirectAttackTarget/styles/panel = SubResource("StyleDirectAttackTarget")
 OverlayPanel/base_type = &"PanelContainer"
 OverlayPanel/styles/panel = SubResource("StyleOverlayPanel")
 PhaseButton/base_type = &"Button"

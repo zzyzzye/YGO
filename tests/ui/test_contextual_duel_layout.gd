@@ -14,6 +14,11 @@ var _battle_events: Array = []
 var _idle_events: Array = []
 var _end_turn_events: Array = []
 var _restart_events: Array = []
+var _direct_attack_events: Array = []
+var _attack_target_preview_events: Array = []
+var _attack_target_events: Array = []
+var _card_selection_cancel_events: Array = []
+var _yes_no_events: Array = []
 
 class FakeBridge:
 	extends RefCounted
@@ -336,6 +341,31 @@ func _run() -> void:
 	board.restart_requested.connect(func() -> void:
 		_restart_events.append(true)
 	)
+	for required_signal in [
+		&"direct_attack_requested",
+		&"attack_target_preview_requested",
+		&"attack_target_requested",
+		&"card_selection_cancel_requested",
+		&"yes_no_requested",
+	]:
+		if !board.has_signal(required_signal):
+			_fail("DuelBoard 缺少规则决策信号：" + required_signal)
+			return
+	board.direct_attack_requested.connect(func() -> void:
+		_direct_attack_events.append(true)
+	)
+	board.attack_target_preview_requested.connect(func(location: Dictionary) -> void:
+		_attack_target_preview_events.append(location)
+	)
+	board.attack_target_requested.connect(func(option_index: int) -> void:
+		_attack_target_events.append(option_index)
+	)
+	board.card_selection_cancel_requested.connect(func() -> void:
+		_card_selection_cancel_events.append(true)
+	)
+	board.yes_no_requested.connect(func(accepted: bool) -> void:
+		_yes_no_events.append(accepted)
+	)
 	if board.find_child("LegacyActionPanel", true, false) != null:
 		_fail("情境式布局不能保留右侧永久操作列")
 		return
@@ -368,6 +398,177 @@ func _run() -> void:
 	var opponent_hand_control: Control = board.opponent_hand
 	if status_toast.get_global_rect().intersects(opponent_hand_control.get_global_rect()):
 		_fail("顶部状态提示不能覆盖对手手牌")
+		return
+
+	var opponent_monster_0 := {
+		"card_id": 10001,
+		"controller": 1,
+		"location": 4,
+		"sequence": 0,
+		"cn_name": "对手怪兽甲",
+	}
+	var opponent_monster_2 := {
+		"card_id": 10002,
+		"controller": 1,
+		"location": 4,
+		"sequence": 2,
+		"cn_name": "对手怪兽乙",
+	}
+	var attack_route_snapshot := {
+		"decision_kind": "yes_no",
+		"decision_description": 31,
+		"local_player_turn": true,
+		"opponent_monsters": [opponent_monster_0, opponent_monster_2],
+	}
+	board.render_snapshot(attack_route_snapshot)
+	var direct_attack_highlight: Panel = board.find_child(
+		"DirectAttackHighlight",
+		true,
+		false
+	)
+	var opponent_status_surface: Control = board.find_child(
+		"OpponentStatusSurface",
+		true,
+		false
+	)
+	if !direct_attack_highlight.visible:
+		_fail("直击确认必须高亮真实对手 LP 点击面")
+		return
+	for sequence in range(board.opponent_monster_zones.size()):
+		var expected_preview := sequence in [0, 2]
+		var target_highlight: Panel = board.opponent_monster_zones[sequence].target_highlight
+		if (
+			target_highlight.visible != expected_preview
+			or (
+				expected_preview
+				and target_highlight.theme_type_variation != &"AttackTargetPreview"
+			)
+		):
+			_fail("直击确认只能给有卡的对手怪兽显示预览样式")
+			return
+	var lp_click := InputEventMouseButton.new()
+	lp_click.button_index = MOUSE_BUTTON_LEFT
+	lp_click.pressed = true
+	opponent_status_surface.gui_input.emit(lp_click)
+	if _direct_attack_events.size() != 1:
+		_fail("点击真实对手 LP 输入面必须只发一次直击请求")
+		return
+	board.opponent_monster_zones[0].card_selected.emit(opponent_monster_0)
+	if (
+		_attack_target_preview_events.size() != 1
+		or _attack_target_preview_events[0] != {
+			"controller": 1,
+			"location": 4,
+			"sequence": 0,
+		}
+		or !_attack_target_events.is_empty()
+	):
+		_fail("点击怪兽预览必须只转发规则位置，不能提前伪造候选索引")
+		return
+
+	var card_selection_snapshot := {
+		"decision_kind": "select_card",
+		"local_player_turn": true,
+		"selection_min": 1,
+		"selection_max": 1,
+		"selection_cancelable": false,
+		"opponent_monsters": [opponent_monster_0, opponent_monster_2],
+		"card_options": [
+			{
+				"index": 8,
+				"controller": 1,
+				"location": 4,
+				"sequence": 2,
+			},
+			{
+				"index": 9,
+				"controller": 0,
+				"location": 4,
+				"sequence": 0,
+			},
+		],
+	}
+	board.render_snapshot(card_selection_snapshot)
+	for sequence in range(board.opponent_monster_zones.size()):
+		var target_highlight: Panel = board.opponent_monster_zones[sequence].target_highlight
+		if (
+			target_highlight.visible != (sequence == 2)
+			or (
+				sequence == 2
+				and target_highlight.theme_type_variation != &"TargetHighlight"
+			)
+		):
+			_fail("真实候选必须按 controller/location/sequence 精确高亮卡位")
+			return
+	if board.action_box.visible or board.action_box.get_child_count() != 0:
+		_fail("不可取消的目标选择不得显示取消按钮")
+		return
+	board.opponent_monster_zones[0].card_selected.emit(opponent_monster_0)
+	board.opponent_monster_zones[2].card_selected.emit(opponent_monster_2)
+	if _attack_target_events != [8] or _attack_target_preview_events.size() != 1:
+		_fail("目标选择只能为合法卡位发出 OCGCore 候选索引")
+		return
+
+	card_selection_snapshot.selection_cancelable = true
+	board.render_snapshot(card_selection_snapshot)
+	if (
+		!board.action_box.visible
+		or board.action_box.get_child_count() != 1
+		or str(board.action_box.get_child(0).text) != "取消攻击"
+	):
+		_fail("可取消目标选择必须只显示“取消攻击”按钮")
+		return
+	board.action_box.get_child(0).pressed.emit()
+	if _card_selection_cancel_events.size() != 1:
+		_fail("取消攻击按钮必须发出卡牌选择取消请求")
+		return
+
+	board.render_snapshot({
+		"decision_kind": "yes_no",
+		"decision_description": 99,
+		"local_player_turn": true,
+		"opponent_monsters": [opponent_monster_0],
+	})
+	var yes_no_texts: Array[String] = []
+	for child in board.confirmation_buttons.get_children():
+		yes_no_texts.append(str(child.text))
+	if (
+		!board.confirmation_overlay.visible
+		or yes_no_texts != ["是", "否"]
+		or direct_attack_highlight.visible
+		or board.opponent_monster_zones[0].target_highlight.visible
+	):
+		_fail("通用 Yes/No 必须使用确认层，且不得显示攻击目标")
+		return
+	board.confirmation_buttons.get_child(0).pressed.emit()
+	if _yes_no_events != [true]:
+		_fail("通用 Yes/No 的“是”必须原样发出 true")
+		return
+	board.render_snapshot({
+		"decision_kind": "yes_no",
+		"decision_description": 99,
+		"local_player_turn": true,
+	})
+	board.confirmation_buttons.get_child(1).pressed.emit()
+	if _yes_no_events != [true, false]:
+		_fail("通用 Yes/No 的“否”必须原样发出 false")
+		return
+
+	board.render_snapshot(attack_route_snapshot)
+	board.render_snapshot({
+		"decision_kind": "yes_no",
+		"decision_description": 31,
+		"local_player_turn": false,
+		"opponent_monsters": [opponent_monster_0],
+	})
+	if (
+		direct_attack_highlight.visible
+		or board.opponent_monster_zones[0].target_highlight.visible
+		or board.confirmation_overlay.visible
+		or board.action_box.visible
+		or board.action_box.get_child_count() != 0
+	):
+		_fail("新快照或终局状态必须立即清除全部决策表现与动态按钮")
 		return
 
 	var matching_action := {

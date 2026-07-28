@@ -9,6 +9,7 @@ signal card_hovered(card_data: Dictionary)
 signal card_unhovered(card_data: Dictionary)
 
 var zone_label := ""
+var _attack_target_preview := false
 var _targetable := false
 var _target_selected := false
 var _card_selected := false
@@ -28,6 +29,13 @@ func configure(label_text: String) -> void:
 	zone_label = label_text
 	if title_label:
 		title_label.text = label_text
+
+
+func set_attack_target_preview(value: bool) -> void:
+	# 预览只表达“可请求 OCGCore 进入怪兽目标选择”，不代表该卡位已被规则层
+	# 判定为合法目标；合法候选到达后由 set_targetable() 以更强样式覆盖。
+	_attack_target_preview = value
+	_refresh_target_highlight()
 
 
 func set_targetable(value: bool) -> void:
@@ -74,10 +82,13 @@ func clear_card() -> void:
 
 
 func _refresh_target_highlight() -> void:
-	target_highlight.visible = _targetable
-	target_highlight.theme_type_variation = (
-		&"TargetSelectedHighlight" if _target_selected else &"TargetHighlight"
-	)
+	target_highlight.visible = _attack_target_preview or _targetable
+	if _target_selected:
+		target_highlight.theme_type_variation = &"TargetSelectedHighlight"
+	elif _targetable:
+		target_highlight.theme_type_variation = &"TargetHighlight"
+	else:
+		target_highlight.theme_type_variation = &"AttackTargetPreview"
 
 
 func _forward_card_selected(card_data: Dictionary) -> void:
