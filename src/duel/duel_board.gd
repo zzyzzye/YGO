@@ -49,25 +49,53 @@ var _can_end_battle := false
 
 
 func _ready() -> void:
-	player_monster_zones = %PlayerMonsterRow.get_children()
-	player_spell_zones = %PlayerSpellRow.get_children()
-	opponent_monster_zones = %OpponentMonsterRow.get_children()
-	opponent_spell_zones = %OpponentSpellRow.get_children()
+	# OCGCore 的 sequence=0..4 对应画面标号 1..5。对手卡位在场景树中按
+	# 5→1 的视觉顺序排列，因此这里必须逐个绑定语义节点，不能依赖子节点顺序。
+	player_monster_zones = [
+		$SafeArea/Battlefield/PlayerMonsterRow/PlayerMonsterZone1,
+		$SafeArea/Battlefield/PlayerMonsterRow/PlayerMonsterZone2,
+		$SafeArea/Battlefield/PlayerMonsterRow/PlayerMonsterZone3,
+		$SafeArea/Battlefield/PlayerMonsterRow/PlayerMonsterZone4,
+		$SafeArea/Battlefield/PlayerMonsterRow/PlayerMonsterZone5,
+	]
+	player_spell_zones = [
+		$SafeArea/Battlefield/PlayerSpellRow/PlayerSpellZone1,
+		$SafeArea/Battlefield/PlayerSpellRow/PlayerSpellZone2,
+		$SafeArea/Battlefield/PlayerSpellRow/PlayerSpellZone3,
+		$SafeArea/Battlefield/PlayerSpellRow/PlayerSpellZone4,
+		$SafeArea/Battlefield/PlayerSpellRow/PlayerSpellZone5,
+	]
+	opponent_monster_zones = [
+		$SafeArea/Battlefield/OpponentMonsterRow/OpponentMonsterZone5,
+		$SafeArea/Battlefield/OpponentMonsterRow/OpponentMonsterZone4,
+		$SafeArea/Battlefield/OpponentMonsterRow/OpponentMonsterZone3,
+		$SafeArea/Battlefield/OpponentMonsterRow/OpponentMonsterZone2,
+		$SafeArea/Battlefield/OpponentMonsterRow/OpponentMonsterZone1,
+	]
+	opponent_spell_zones = [
+		$SafeArea/Battlefield/OpponentSpellRow/OpponentSpellZone5,
+		$SafeArea/Battlefield/OpponentSpellRow/OpponentSpellZone4,
+		$SafeArea/Battlefield/OpponentSpellRow/OpponentSpellZone3,
+		$SafeArea/Battlefield/OpponentSpellRow/OpponentSpellZone2,
+		$SafeArea/Battlefield/OpponentSpellRow/OpponentSpellZone1,
+	]
 	assert(player_monster_zones.size() == 5, "玩家怪兽区必须有五个原生卡位")
 	assert(player_spell_zones.size() == 5, "玩家魔陷区必须有五个原生卡位")
 	assert(opponent_monster_zones.size() == 5, "对手怪兽区必须有五个原生卡位")
 	assert(opponent_spell_zones.size() == 5, "对手魔陷区必须有五个原生卡位")
 
-	_configure_zone_row(player_monster_zones, "玩家怪兽", false)
-	_configure_zone_row(player_spell_zones, "玩家魔陷", false)
-	_configure_zone_row(opponent_monster_zones, "对手怪兽", true)
-	_configure_zone_row(opponent_spell_zones, "对手魔陷", true)
+	_configure_zone_row(player_monster_zones, "玩家怪兽")
+	_configure_zone_row(player_spell_zones, "玩家魔陷")
+	_configure_zone_row(opponent_monster_zones, "对手怪兽")
+	_configure_zone_row(opponent_spell_zones, "对手魔陷")
 
 	player_hand.card_selected.connect(_on_card_selected)
 	player_hand.card_hovered.connect(_preview_card)
 	player_hand.card_unhovered.connect(_on_card_unhovered)
 	for zone in player_monster_zones + player_spell_zones:
-		zone.card_selected.connect(_on_card_selected)
+		# 绑定信号来源后，场上卡牌选择才能精确驱动对应 ZoneView 的 CardView
+		# 选择框；卡牌数据本身不携带其场景节点引用，不能据此猜测视觉来源。
+		zone.card_selected.connect(_on_card_selected.bind(zone))
 		zone.card_hovered.connect(_preview_card)
 		zone.card_unhovered.connect(_on_card_unhovered)
 	# 对手区域只允许预览。规则层不会为它们暴露可提交动作，界面也不连接选择信号，
@@ -83,10 +111,9 @@ func _ready() -> void:
 	%Background.gui_input.connect(_on_background_input)
 
 
-func _configure_zone_row(zones: Array, prefix: String, opponent: bool) -> void:
+func _configure_zone_row(zones: Array, prefix: String) -> void:
 	for index in range(zones.size()):
-		var display_index := 5 - index if opponent else index + 1
-		zones[index].configure("%s %s" % [prefix, display_index])
+		zones[index].configure("%s %s" % [prefix, index + 1])
 
 
 func render_snapshot(snapshot: Dictionary) -> void:
@@ -136,11 +163,14 @@ func _render_zone_cards(zones: Array, cards: Array) -> void:
 			zones[sequence].show_card(card, !card.has("card_id"))
 
 
-func _on_card_selected(card_data: Dictionary) -> void:
+func _on_card_selected(card_data: Dictionary, source_zone: ZoneView = null) -> void:
 	if card_data.is_empty():
 		_unlock_selection()
 		return
 	selected_card = card_data
+	if source_zone != null and player_hand != null:
+		player_hand.clear_selection()
+	_set_field_card_selection(source_zone)
 	_show_card_detail(card_data)
 	_rebuild_action_buttons()
 
@@ -239,6 +269,7 @@ func _clear_selection() -> void:
 	_hovered_card = {}
 	if player_hand != null:
 		player_hand.clear_selection()
+	_set_field_card_selection(null)
 	_clear_dynamic_children(action_box)
 	action_box.visible = false
 	_hide_card_detail()
@@ -250,12 +281,20 @@ func _unlock_selection() -> void:
 	selected_card = {}
 	if player_hand != null:
 		player_hand.clear_selection()
+	_set_field_card_selection(null)
 	_clear_dynamic_children(action_box)
 	action_box.visible = false
 	if _hovered_card.is_empty():
 		_hide_card_detail()
 	else:
 		_show_card_detail(_hovered_card)
+
+
+func _set_field_card_selection(selected_zone: ZoneView) -> void:
+	# selected_card 只保存来自公开快照的语义字段；节点选择框是纯表现状态。
+	# 每次来源变化都遍历全部己方场区，保证手牌选择、取消和新快照不会留下旧边框。
+	for zone in player_monster_zones + player_spell_zones:
+		zone.set_card_selected(zone == selected_zone)
 
 
 func _same_card(left: Dictionary, right: Dictionary) -> bool:

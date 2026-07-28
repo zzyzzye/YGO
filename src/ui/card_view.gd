@@ -12,6 +12,7 @@ var selected := false
 @onready var selection_frame: Panel = %SelectionFrame
 @onready var card_back_panel: Panel = %CardBackPanel
 @onready var face_down_label: Label = %FaceDownLabel
+@onready var face_up_placeholder: Panel = %FaceUpPlaceholder
 @onready var animator: AnimationPlayer = %AnimationPlayer
 
 
@@ -36,9 +37,16 @@ func configure(data: Dictionary, show_back := false) -> void:
 	tooltip_text = "对手手牌" if show_back else str(data.get("cn_name", data.get("card_id", "未知卡片")))
 	if !show_back:
 		texture_normal = _load_external_texture(str(data.get("image_path", "")))
+	# 正面卡图来自项目外部文件，缺失或损坏都属于可恢复展示问题。原生占位只在
+	# 正面且纹理加载失败时出现；卡背与有效卡图必须保持各自唯一的视觉来源。
+	face_up_placeholder.visible = !show_back and texture_normal == null
 
 
 func set_selected(value: bool) -> void:
+	# 新快照会为每张未选卡重复写入 false；无状态变化时不得播放 reset，
+	# 否则所有卡牌都会先从选中缩放回落，响应式布局也无法及时稳定。
+	if selected == value and selection_frame.visible == value:
+		return
 	selected = value
 	selection_frame.visible = value
 	animator.play("select" if value else "reset")

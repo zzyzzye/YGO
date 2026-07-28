@@ -149,6 +149,166 @@ func _run() -> void:
 		_fail("再次点击同一卡牌必须发出空字典以取消选择")
 		return
 
+	# queue_free() 延迟到帧末；组件必须在同帧先让旧卡脱离容器、禁用输入并且
+	# 只断开自己建立的三条转发。测试额外保留旧卡外部观察者，防止实现粗暴断开全部连接。
+	var atomic_hand: HandView = HAND_VIEW_SCENE.instantiate()
+	root.add_child(atomic_hand)
+	await process_frame
+	var hand_forwarded_selected: Array = []
+	var hand_forwarded_hovered: Array = []
+	var hand_forwarded_unhovered: Array = []
+	atomic_hand.card_selected.connect(
+		func(data: Dictionary) -> void: hand_forwarded_selected.append(data)
+	)
+	atomic_hand.card_hovered.connect(
+		func(data: Dictionary) -> void: hand_forwarded_hovered.append(data)
+	)
+	atomic_hand.card_unhovered.connect(
+		func(data: Dictionary) -> void: hand_forwarded_unhovered.append(data)
+	)
+	var old_hand_data := {
+		"card_id": 30001,
+		"sequence": 0,
+		"location": 2,
+		"controller": 0,
+	}
+	var new_hand_data := {
+		"card_id": 30002,
+		"sequence": 1,
+		"location": 2,
+		"controller": 0,
+	}
+	atomic_hand.render_cards([old_hand_data], false)
+	var retired_hand_card: CardView = atomic_hand.get_child(0)
+	var retired_hand_external_events: Array[String] = []
+	retired_hand_card.card_selected.connect(
+		func(_data: Dictionary) -> void: retired_hand_external_events.append("选择")
+	)
+	retired_hand_card.card_hovered.connect(
+		func(_data: Dictionary) -> void: retired_hand_external_events.append("悬浮")
+	)
+	retired_hand_card.card_unhovered.connect(
+		func(_data: Dictionary) -> void: retired_hand_external_events.append("离开")
+	)
+	atomic_hand.render_cards([new_hand_data], false)
+	if (
+		atomic_hand.get_child_count() != 1
+		or int(atomic_hand.get_child(0).card_data.card_id) != int(new_hand_data.card_id)
+		or retired_hand_card.get_parent() != null
+		or !retired_hand_card.disabled
+		or retired_hand_card.mouse_filter != Control.MOUSE_FILTER_IGNORE
+	):
+		_fail("HandView 同帧替换后必须立即只保留可输入的新卡")
+		return
+	retired_hand_card.card_selected.emit(old_hand_data)
+	retired_hand_card.card_hovered.emit(old_hand_data)
+	retired_hand_card.card_unhovered.emit(old_hand_data)
+	if (
+		!hand_forwarded_selected.is_empty()
+		or !hand_forwarded_hovered.is_empty()
+		or !hand_forwarded_unhovered.is_empty()
+	):
+		_fail("HandView 已退休卡牌不得继续向组件转发事件")
+		return
+	if retired_hand_external_events != ["选择", "悬浮", "离开"]:
+		_fail("HandView 退休时不得断开卡牌的外部观察者")
+		return
+	var current_hand_card: CardView = atomic_hand.get_child(0)
+	current_hand_card.card_selected.emit(new_hand_data)
+	current_hand_card.card_hovered.emit(new_hand_data)
+	current_hand_card.card_unhovered.emit(new_hand_data)
+	if (
+		hand_forwarded_selected.size() != 1
+		or hand_forwarded_hovered.size() != 1
+		or hand_forwarded_unhovered.size() != 1
+	):
+		_fail("HandView 新卡牌必须继续完整转发三个事件")
+		return
+
+	var atomic_zone: ZoneView = ZONE_VIEW_SCENE.instantiate()
+	root.add_child(atomic_zone)
+	await process_frame
+	var zone_forwarded_selected: Array = []
+	var zone_forwarded_hovered: Array = []
+	var zone_forwarded_unhovered: Array = []
+	atomic_zone.card_selected.connect(
+		func(data: Dictionary) -> void: zone_forwarded_selected.append(data)
+	)
+	atomic_zone.card_hovered.connect(
+		func(data: Dictionary) -> void: zone_forwarded_hovered.append(data)
+	)
+	atomic_zone.card_unhovered.connect(
+		func(data: Dictionary) -> void: zone_forwarded_unhovered.append(data)
+	)
+	var old_zone_data := {
+		"card_id": 40001,
+		"sequence": 0,
+		"location": 4,
+		"controller": 0,
+	}
+	var new_zone_data := {
+		"card_id": 40002,
+		"sequence": 0,
+		"location": 4,
+		"controller": 0,
+	}
+	atomic_zone.show_card(old_zone_data, false)
+	var retired_zone_card: CardView = atomic_zone.card_container.get_child(0)
+	var retired_zone_external_events: Array[String] = []
+	retired_zone_card.card_selected.connect(
+		func(_data: Dictionary) -> void: retired_zone_external_events.append("选择")
+	)
+	retired_zone_card.card_hovered.connect(
+		func(_data: Dictionary) -> void: retired_zone_external_events.append("悬浮")
+	)
+	retired_zone_card.card_unhovered.connect(
+		func(_data: Dictionary) -> void: retired_zone_external_events.append("离开")
+	)
+	atomic_zone.show_card(new_zone_data, false)
+	if (
+		atomic_zone.card_container.get_child_count() != 1
+		or int(atomic_zone.card_container.get_child(0).card_data.card_id)
+			!= int(new_zone_data.card_id)
+		or retired_zone_card.get_parent() != null
+		or !retired_zone_card.disabled
+		or retired_zone_card.mouse_filter != Control.MOUSE_FILTER_IGNORE
+	):
+		_fail("ZoneView 同帧替换后必须立即只保留可输入的新卡")
+		return
+	retired_zone_card.card_selected.emit(old_zone_data)
+	retired_zone_card.card_hovered.emit(old_zone_data)
+	retired_zone_card.card_unhovered.emit(old_zone_data)
+	if (
+		!zone_forwarded_selected.is_empty()
+		or !zone_forwarded_hovered.is_empty()
+		or !zone_forwarded_unhovered.is_empty()
+	):
+		_fail("ZoneView 已退休卡牌不得继续向组件转发事件")
+		return
+	if retired_zone_external_events != ["选择", "悬浮", "离开"]:
+		_fail("ZoneView 退休时不得断开卡牌的外部观察者")
+		return
+	var cleared_zone_card: CardView = atomic_zone.card_container.get_child(0)
+	atomic_zone.clear_card()
+	if (
+		atomic_zone.card_container.get_child_count() != 0
+		or cleared_zone_card.get_parent() != null
+		or !cleared_zone_card.disabled
+		or cleared_zone_card.mouse_filter != Control.MOUSE_FILTER_IGNORE
+	):
+		_fail("ZoneView 清空卡牌时必须同帧移出并禁用旧卡")
+		return
+	cleared_zone_card.card_selected.emit(new_zone_data)
+	cleared_zone_card.card_hovered.emit(new_zone_data)
+	cleared_zone_card.card_unhovered.emit(new_zone_data)
+	if (
+		!zone_forwarded_selected.is_empty()
+		or !zone_forwarded_hovered.is_empty()
+		or !zone_forwarded_unhovered.is_empty()
+	):
+		_fail("ZoneView 清空后的卡牌不得继续向组件转发事件")
+		return
+
 	# 决斗场的固定节点、主题和信号绑定属于原生场景契约；交互测试先固定
 	# PackedScene 消费方式，Main 的同路径集成由后续迁移任务负责。
 	var board: DuelBoard = DUEL_BOARD_SCENE.instantiate()
@@ -295,7 +455,7 @@ func _run() -> void:
 	var field_card := card.duplicate()
 	field_card.location = 4
 	field_card.sequence = 0
-	board.render_snapshot({
+	var battle_snapshot := {
 		"player_monsters": [field_card],
 		"idle_actions": [{
 			"card_id": field_card.card_id,
@@ -309,7 +469,27 @@ func _run() -> void:
 		"phase_kind": "battle",
 		"can_enter_main2": true,
 		"can_end_battle": true,
-	})
+	}
+	board.render_snapshot(battle_snapshot)
+	board.player_monster_zones[0].card_selected.emit(field_card)
+	var selected_field_card: CardView = (
+		board.player_monster_zones[0].card_container.get_child(0)
+	)
+	if !selected_field_card.selected or !selected_field_card.selection_frame.visible:
+		_fail("选择场上怪兽时必须显示 CardView 选择框")
+		return
+	board.render_snapshot(battle_snapshot)
+	await process_frame
+	var refreshed_field_card: CardView = (
+		board.player_monster_zones[0].card_container.get_child(0)
+	)
+	if (
+		!board.selected_card.is_empty()
+		or refreshed_field_card.selected
+		or refreshed_field_card.selection_frame.visible
+	):
+		_fail("新快照必须清除场上怪兽的选择视觉")
+		return
 	board.player_monster_zones[0].card_selected.emit(field_card)
 	if !action_bar.visible or str(action_bar.get_child(0).text) != "攻击":
 		_fail("战斗阶段必须在场上怪兽旁显示真实攻击动作")
@@ -421,6 +601,8 @@ func _run() -> void:
 	main.free()
 	hand.queue_free()
 	zone.queue_free()
+	atomic_hand.queue_free()
+	atomic_zone.queue_free()
 	board.queue_free()
 	await process_frame
 	await process_frame

@@ -196,15 +196,19 @@ theme_override_font_sizes/font_size = 20
 unique_name_in_owner = true
 z_index = 8
 layout_mode = 1
-anchor_left = 0.84
-anchor_top = 0.43
-anchor_right = 0.935
-anchor_bottom = 0.57
+anchors_preset = 8
+anchor_left = 0.89
+anchor_top = 0.5
+anchor_right = 0.89
+anchor_bottom = 0.5
+offset_left = -72.0
+offset_top = -72.0
+offset_right = 72.0
+offset_bottom = 72.0
 grow_horizontal = 2
 grow_vertical = 2
 mouse_default_cursor_shape = 2
 theme_type_variation = &"PhaseButton"
-theme_override_font_sizes/font_size = 20
 disabled = true
 text = "玩家1\n主要阶段"
 
@@ -213,11 +217,13 @@ unique_name_in_owner = true
 z_index = 9
 layout_mode = 1
 anchor_left = 0.84
-anchor_top = 0.92
 anchor_right = 0.985
-anchor_bottom = 0.985
+anchor_top = 1.0
+anchor_bottom = 1.0
+offset_top = -76.0
+offset_bottom = -18.0
 grow_horizontal = 2
-grow_vertical = 2
+grow_vertical = 0
 theme_type_variation = &"SystemToolsLayout"
 alignment = 2
 
@@ -228,7 +234,6 @@ layout_mode = 2
 mouse_default_cursor_shape = 2
 tooltip_text = "重新开局"
 theme_type_variation = &"SystemButton"
-theme_override_font_sizes/font_size = 24
 text = "↻"
 
 [node name="DebugButton" type="Button" parent="SafeArea/SystemTools"]
@@ -238,7 +243,6 @@ layout_mode = 2
 mouse_default_cursor_shape = 2
 tooltip_text = "诊断信息"
 theme_type_variation = &"SystemButton"
-theme_override_font_sizes/font_size = 24
 text = "i"
 
 [node name="ExitButton" type="Button" parent="SafeArea/SystemTools"]
@@ -248,7 +252,6 @@ layout_mode = 2
 mouse_default_cursor_shape = 2
 tooltip_text = "退出游戏"
 theme_type_variation = &"SystemButton"
-theme_override_font_sizes/font_size = 24
 text = "×"
 
 [node name="StatusToast" type="Label" parent="SafeArea"]
