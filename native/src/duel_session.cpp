@@ -192,6 +192,7 @@ ProcessResult DuelSession::step() {
 
 ProcessResult DuelSession::process_once() {
 	int status = OCG_DUEL_STATUS_CONTINUE;
+	bool response_rejected = false;
 	constexpr int max_auto_pass_count = 32;
 	for (int pass_index = 0; pass_index < max_auto_pass_count; ++pass_index) {
 		status = OCG_DuelProcess(static_cast<OCG_Duel>(duel_));
@@ -236,6 +237,7 @@ ProcessResult DuelSession::process_once() {
 			// 不可变快照，尤其是 SelectCard 候选与取消约束；否则界面既
 			// 无法重新展示合法选择，也可能用过期索引绕过语义门禁。
 			pending_action_ = last_submitted_action_;
+			response_rejected = true;
 		} else if (pending_action_.kind != PendingActionKind::None
 				&& pending_action_.kind != PendingActionKind::AutoPassChain) {
 			last_submitted_action_ = {};
@@ -306,7 +308,7 @@ ProcessResult DuelSession::process_once() {
 				"OCGCore 等待输入，但本轮消息中没有可识别的玩家决策",
 		};
 	}
-	return {true, status, std::move(message), pending_action_};
+	return {true, status, std::move(message), pending_action_, response_rejected};
 }
 
 void DuelSession::set_response(const void *response_data, std::size_t response_size) {

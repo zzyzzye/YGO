@@ -74,6 +74,7 @@ godot::Dictionary process_result_to_dictionary(const ProcessResult &result) {
 	response["status"] = result.status;
 	response["message"] = godot::String::utf8(result.message.c_str());
 	response["pending_action"] = pending_action_to_dictionary(result.pending_action);
+	response["response_rejected"] = result.response_rejected;
 	return response;
 }
 
@@ -86,6 +87,7 @@ ProcessResult advance_to_local_decision(DuelSession &session, ProcessResult resu
 	for (int step_index = 0;
 			step_index < max_steps
 			&& result.ok
+			&& !result.response_rejected
 			&& result.status != OCG_DUEL_STATUS_END;
 			++step_index) {
 		if (result.pending_action.kind == PendingActionKind::None) {

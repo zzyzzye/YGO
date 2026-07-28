@@ -30,6 +30,10 @@ struct ProcessResult {
 	int status = -1;
 	std::string message;
 	PendingAction pending_action;
+	// 仅表示 OCGCore 通过 MSG_RETRY 拒绝了刚提交的响应，并且 Session 已
+	// 恢复提交前的完整 PendingAction。它与本地参数校验失败（ok=false）
+	// 不同，Godot 应保留原交互上下文并允许用户重新选择。
+	bool response_rejected = false;
 };
 
 // OCGCore 区域查询返回的最小可视快照。这里只保留界面渲染和动作校验所需的

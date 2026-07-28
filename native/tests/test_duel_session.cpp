@@ -411,6 +411,8 @@ void test_fixed_real_decks_advance_to_second_players_idle_action() {
 	replay_process = replay.submit_idle_action(
 			replay_summon->kind,
 			replay_summon->index);
+	assert(replay_process.ok);
+	assert(!replay_process.response_rejected);
 	for (int step_index = 0;
 			step_index < 100
 			&& replay_process.pending_action.kind == ygo::PendingActionKind::None;
@@ -435,6 +437,7 @@ void test_fixed_real_decks_advance_to_second_players_idle_action() {
 	replay.pending_action_ = submitted;
 
 	const ygo::ProcessResult retry = replay.submit_card_selection(0);
+	assert(retry.response_rejected);
 	assert(retry.pending_action.kind == ygo::PendingActionKind::SelectCard);
 	assert(retry.pending_action.player == submitted.player);
 	assert(retry.pending_action.message_type == submitted.message_type);
@@ -453,6 +456,7 @@ void test_fixed_real_decks_advance_to_second_players_idle_action() {
 	const ygo::ProcessResult stale =
 			replay.submit_card_selection(99);
 	assert(!stale.ok);
+	assert(!stale.response_rejected);
 	assert(stale.message == "卡牌候选不属于当前 OCGCore 候选列表");
 	assert(stale.pending_action.kind == ygo::PendingActionKind::SelectCard);
 	assert(stale.pending_action.card_options.size() == 2);

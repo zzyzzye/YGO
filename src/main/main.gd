@@ -98,9 +98,15 @@ func _build_deck_ids(source_ids: PackedInt64Array, duel_seed: int) -> PackedInt6
 	return deck
 
 
-func _refresh_board(status_text: String) -> void:
+func _refresh_board(status_text: String, pending_override: Dictionary = {}) -> void:
 	var state: Dictionary = bridge.call("get_duel_state")
-	var pending: Dictionary = bridge.call("get_pending_action")
+	# Retry 响应已经携带 Session 恢复后的决策，优先采用同一次调用的返回值，
+	# 避免额外查询与后续自动推进之间出现观察时序差异。
+	var pending: Dictionary = (
+		pending_override.duplicate(true)
+		if !pending_override.is_empty()
+		else bridge.call("get_pending_action")
+	)
 	if !state.ok:
 		board.show_status("读取决斗状态失败：" + str(state.message))
 		return
@@ -304,6 +310,8 @@ func _on_attack_target_requested(option_index: int) -> void:
 	if !bool(response.get("ok", false)):
 		board.show_status("攻击目标提交失败：" + str(response.get("message", "未知错误")))
 		return
+	if _restore_rejected_response(response):
+		return
 	_clear_attack_target_preview()
 	_clear_attack_target_context()
 	_refresh_board("攻击目标已提交，场面已由 OCGCore 更新")
@@ -317,14 +325,19 @@ func _on_card_selection_cancel_requested() -> void:
 		or !bool(_current_pending_action.get("cancelable", false))
 	):
 		return
-	# 显式取消代表用户放弃整条预选路径；即使 Bridge 拒绝取消，也不能在随后
-	# 的其他决策中复用该位置。失败时 DuelBoard 仍保留当前合法候选供重试。
+	# 显式取消成功后会放弃整条预选路径；本地失败或 OCGCore Retry 时仍须
+	# 保留当前合法候选供重试，不能把“请求已发出”误当成“规则已接受”。
+	var preview_before_cancel := _pending_attack_target_preview.duplicate()
 	_clear_attack_target_preview()
 	_submission_in_progress = true
 	var response: Dictionary = bridge.call("cancel_card_selection")
 	_submission_in_progress = false
 	if !bool(response.get("ok", false)):
 		board.show_status("取消目标选择失败：" + str(response.get("message", "未知错误")))
+		return
+	if bool(response.get("response_rejected", false)):
+		_pending_attack_target_preview = preview_before_cancel
+		_restore_rejected_response(response)
 		return
 	_clear_attack_target_context()
 	_refresh_board("已取消攻击目标选择")
@@ -355,6 +368,8 @@ func _submit_yes_no_response(accepted: bool, success_text: String) -> void:
 	if !bool(response.get("ok", false)):
 		board.show_status("规则确认失败：" + str(response.get("message", "未知错误")))
 		return
+	if _restore_rejected_response(response):
+		return
 	if responds_to_attack_route:
 		_attack_target_context_state = (
 			ATTACK_CONTEXT_NONE
@@ -362,6 +377,24 @@ func _submit_yes_no_response(accepted: bool, success_text: String) -> void:
 			else ATTACK_CONTEXT_AWAITING_TARGET
 		)
 	_refresh_board(success_text)
+
+
+func _restore_rejected_response(response: Dictionary) -> bool:
+	if !bool(response.get("response_rejected", false)):
+		return false
+	# MSG_RETRY 的 ok=true 表示会话本身仍可用，不代表玩家响应已被接受。
+	# Bridge 已把提交前 PendingAction 恢复到 Session；这里不改变攻击来源
+	# 状态和预选，只刷新真实快照，让同一个合法入口可再次提交。
+	var preview_before_refresh := _pending_attack_target_preview.duplicate()
+	_refresh_board(
+		"OCGCore 拒绝了响应，请重新选择",
+		response.get("pending_action", {})
+	)
+	# 路线 YesNo(false) 的怪兽预选需要跨过 Retry 后再次提交；常规刷新会
+	# 因当前仍是 ROUTE 而清空它，所以只在结构化拒绝分支恢复这份位置。
+	_pending_attack_target_preview = preview_before_refresh
+	board.show_status("OCGCore 拒绝了响应，请重新选择")
+	return true
 
 
 func _submit_previewed_attack_target(pending: Dictionary) -> void:

@@ -31,6 +31,7 @@ class FakeBridge:
 	var attack_returns_select_card := false
 	var opponent_monster_sequences: Array[int] = [0, 2]
 	var fail_next_method := ""
+	var reject_next_method := ""
 	var reentrant_direct_request := Callable()
 
 	func _init() -> void:
@@ -120,6 +121,8 @@ class FakeBridge:
 			callback.call()
 		if _consume_failure("submit_yes_no"):
 			return _failure("测试是/否提交失败")
+		if _consume_rejection("submit_yes_no"):
+			return _rejection("OCGCore 拒绝了测试是/否响应")
 		if accepted:
 			opponent_lp = 3600
 			pending = _battle_pending()
@@ -131,6 +134,8 @@ class FakeBridge:
 		calls.append({"method": "submit_card_selection", "index": index})
 		if _consume_failure("submit_card_selection"):
 			return _failure("测试目标提交失败")
+		if _consume_rejection("submit_card_selection"):
+			return _rejection("OCGCore 拒绝了测试目标响应")
 		pending = _battle_pending()
 		return _success("攻击目标已提交")
 
@@ -138,6 +143,8 @@ class FakeBridge:
 		calls.append({"method": "cancel_card_selection"})
 		if _consume_failure("cancel_card_selection"):
 			return _failure("测试取消失败")
+		if _consume_rejection("cancel_card_selection"):
+			return _rejection("OCGCore 拒绝了测试取消响应")
 		pending = _battle_pending()
 		return _success("目标选择已取消")
 
@@ -154,8 +161,27 @@ class FakeBridge:
 		fail_next_method = ""
 		return true
 
+	func _consume_rejection(method_name: String) -> bool:
+		if reject_next_method != method_name:
+			return false
+		reject_next_method = ""
+		return true
+
 	func _success(message: String) -> Dictionary:
-		return {"ok": true, "message": message, "pending_action": pending.duplicate(true)}
+		return {
+			"ok": true,
+			"response_rejected": false,
+			"message": message,
+			"pending_action": pending.duplicate(true),
+		}
+
+	func _rejection(message: String) -> Dictionary:
+		return {
+			"ok": true,
+			"response_rejected": true,
+			"message": message,
+			"pending_action": pending.duplicate(true),
+		}
 
 	func _failure(message: String) -> Dictionary:
 		return {"ok": false, "message": message, "pending_action": pending.duplicate(true)}
@@ -248,10 +274,89 @@ func _run() -> void:
 		return
 	if !await _test_yes_no_and_cancel_failures_keep_current_snapshot():
 		return
+	if !await _test_retry_restores_all_attack_interactions():
+		return
 	if !await _test_cancel_generic_yes_no_restart_and_game_over_cleanup():
 		return
 	print("攻击目标 Main 编排端到端契约通过")
 	quit(0)
+
+
+func _test_retry_restores_all_attack_interactions() -> bool:
+	# 四种响应都由同一真实 Main 路由发出。FakeBridge 只模拟 OCGCore 的
+	# MSG_RETRY 结果：ok 仍为 true，但 pending_action 保持提交前快照。
+	for accepted in [true, false]:
+		var fake := FakeBridge.new()
+		var main = await _mount_main(fake)
+		if !_request_attack(main):
+			return false
+		var board: DuelBoard = main.board
+		fake.reject_next_method = "submit_yes_no"
+		if accepted:
+			board.direct_attack_requested.emit()
+		else:
+			board.opponent_monster_zones[2].card_selected.emit(
+				fake._opponent_monster(2)
+			)
+		if !_check(
+			main._attack_target_context_state == main.ATTACK_CONTEXT_ROUTE
+				and main._current_attack_target_context_supported
+				and str(fake.pending.kind) == "yes_no"
+				and board.direct_attack_highlight.visible
+				and (
+					main._pending_attack_target_preview.is_empty()
+					if accepted
+					else int(main._pending_attack_target_preview.sequence) == 2
+				)
+				and "OCGCore 拒绝了响应，请重新选择" in board.status_label.text,
+			"YesNo %s 被拒绝后必须恢复路线入口与提交前预选" % accepted
+		):
+			return false
+		await _unmount_main(main)
+
+	var target_fake := FakeBridge.new()
+	var target_main = await _mount_main(target_fake)
+	if !_request_attack(target_main):
+		return false
+	var target_board: DuelBoard = target_main.board
+	target_board.opponent_monster_zones[0].card_selected.emit(
+		target_fake._opponent_monster(0)
+	)
+	target_fake.reject_next_method = "submit_card_selection"
+	target_board.opponent_monster_zones[2].card_selected.emit(
+		target_fake._opponent_monster(2)
+	)
+	if !_check(
+		target_main._attack_target_context_state == target_main.ATTACK_CONTEXT_TARGET
+			and target_main._current_attack_target_context_supported
+			and target_board.opponent_monster_zones[2].target_highlight.visible
+			and "OCGCore 拒绝了响应，请重新选择" in target_board.status_label.text,
+		"攻击目标被拒绝后必须恢复目标上下文与高亮"
+	):
+		return false
+	await _unmount_main(target_main)
+
+	var cancel_fake := FakeBridge.new()
+	var cancel_main = await _mount_main(cancel_fake)
+	if !_request_attack(cancel_main):
+		return false
+	var cancel_board: DuelBoard = cancel_main.board
+	cancel_board.opponent_monster_zones[0].card_selected.emit(
+		cancel_fake._opponent_monster(0)
+	)
+	cancel_fake.reject_next_method = "cancel_card_selection"
+	cancel_board.action_box.get_child(0).pressed.emit()
+	if !_check(
+		cancel_main._attack_target_context_state == cancel_main.ATTACK_CONTEXT_TARGET
+			and cancel_main._current_attack_target_context_supported
+			and cancel_board.opponent_monster_zones[2].target_highlight.visible
+			and cancel_board.action_box.visible
+			and "OCGCore 拒绝了响应，请重新选择" in cancel_board.status_label.text,
+		"取消被拒绝后必须恢复目标上下文、高亮与取消入口"
+	):
+		return false
+	await _unmount_main(cancel_main)
+	return true
 
 
 func _test_direct_attack_and_submission_lock() -> bool:
