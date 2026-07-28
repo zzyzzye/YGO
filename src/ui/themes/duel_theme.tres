@@ -70,6 +70,14 @@ corner_radius_bottom_right = 4
 corner_radius_bottom_left = 4
 
 [resource]
+BattlefieldLayout/base_type = &"VBoxContainer"
+BattlefieldLayout/constants/separation = 7
+ZoneRowLayout/base_type = &"HBoxContainer"
+ZoneRowLayout/constants/separation = 10
+ContextActionBarLayout/base_type = &"HBoxContainer"
+ContextActionBarLayout/constants/separation = 10
+SystemToolsLayout/base_type = &"HBoxContainer"
+SystemToolsLayout/constants/separation = 12
 CardSelection/base_type = &"Panel"
 CardSelection/styles/panel = SubResource("StyleCardSelection")
 ZonePanel/base_type = &"Panel"
