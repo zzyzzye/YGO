@@ -4,6 +4,7 @@
 #include "ocgapi_constants.h"
 
 #include <algorithm>
+#include <limits>
 
 namespace {
 
@@ -114,6 +115,9 @@ CreateResult DuelSession::create(std::uint64_t seed) {
 	}
 
 	duel_ = duel;
+	life_points_ = {8000, 8000};
+	winner_ = -1;
+	win_reason_ = -1;
 	const auto bootstrap = scripts_->load_bootstrap(duel);
 	if (!bootstrap.ok) {
 		destroy();
@@ -194,6 +198,27 @@ ProcessResult DuelSession::process_once() {
 		const auto *message_data = static_cast<const std::uint8_t *>(
 				OCG_DuelGetMessage(static_cast<OCG_Duel>(duel_), &message_size));
 		pending_action_ = parse_pending_action(message_data, message_size);
+		for (const LifePointEvent &event : pending_action_.life_point_events) {
+			if (event.player >= life_points_.size()) {
+				continue;
+			}
+			const std::int64_t current = life_points_[event.player];
+			std::int64_t next = static_cast<std::int64_t>(event.amount);
+			if (event.kind == LifePointEventKind::Damage) {
+				next = current - static_cast<std::int64_t>(event.amount);
+			} else if (event.kind == LifePointEventKind::Recover) {
+				next = current + static_cast<std::int64_t>(event.amount);
+			}
+			life_points_[event.player] = static_cast<std::int32_t>(
+					std::clamp<std::int64_t>(
+							next,
+							0,
+							std::numeric_limits<std::int32_t>::max()));
+		}
+		if (pending_action_.winner >= 0) {
+			winner_ = pending_action_.winner;
+			win_reason_ = pending_action_.win_reason;
+		}
 		if (pending_action_.kind == PendingActionKind::AutoSelectPlace
 				&& !allow_auto_select_place_) {
 			pending_action_ = {

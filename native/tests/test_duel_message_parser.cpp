@@ -86,6 +86,34 @@ void test_battle_message_exposes_attackers_and_phase_options() {
 	assert(pending.battle_actions[1].direct_attackable);
 }
 
+void test_life_point_and_win_notifications_are_preserved() {
+	std::vector<std::uint8_t> stream;
+	std::vector<std::uint8_t> damage{MSG_DAMAGE, 1};
+	append_little_endian<std::uint32_t>(damage, 2500);
+	append_frame(stream, damage);
+	std::vector<std::uint8_t> recover{MSG_RECOVER, 0};
+	append_little_endian<std::uint32_t>(recover, 500);
+	append_frame(stream, recover);
+	std::vector<std::uint8_t> update{MSG_LPUPDATE, 1};
+	append_little_endian<std::uint32_t>(update, 7000);
+	append_frame(stream, update);
+	append_frame(stream, {MSG_WIN, 0, 1});
+
+	const ygo::PendingAction pending =
+			ygo::parse_pending_action(stream.data(), stream.size());
+	assert(pending.life_point_events.size() == 3);
+	assert(pending.life_point_events[0].kind
+			== ygo::LifePointEventKind::Damage);
+	assert(pending.life_point_events[0].player == 1);
+	assert(pending.life_point_events[0].amount == 2500);
+	assert(pending.life_point_events[1].kind
+			== ygo::LifePointEventKind::Recover);
+	assert(pending.life_point_events[2].kind
+			== ygo::LifePointEventKind::Set);
+	assert(pending.winner == 0);
+	assert(pending.win_reason == 1);
+}
+
 void test_truncated_frame_is_reported_as_malformed() {
 	const std::vector<std::uint8_t> stream{
 			8, 0, 0, 0, // 声明正文有 8 字节。
@@ -298,6 +326,7 @@ void test_select_place_exposes_first_available_own_monster_zone() {
 int main() {
 	test_notification_before_idle_action_does_not_hide_pending_player();
 	test_battle_message_exposes_attackers_and_phase_options();
+	test_life_point_and_win_notifications_are_preserved();
 	test_truncated_frame_is_reported_as_malformed();
 	test_unimplemented_interactive_message_is_not_silently_ignored();
 	test_empty_optional_chain_is_safe_to_auto_pass();

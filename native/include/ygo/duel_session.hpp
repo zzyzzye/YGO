@@ -5,6 +5,7 @@
 #include "ygo/official_script_loader.hpp"
 
 #include <cstdint>
+#include <array>
 #include <vector>
 #include <memory>
 #include <string>
@@ -86,6 +87,15 @@ public:
 	[[nodiscard]] const PendingAction &pending_action() const noexcept {
 		return pending_action_;
 	}
+	[[nodiscard]] std::int32_t life_points(std::uint8_t team) const noexcept {
+		return team < life_points_.size() ? life_points_[team] : 0;
+	}
+	[[nodiscard]] int winner() const noexcept {
+		return winner_;
+	}
+	[[nodiscard]] int win_reason() const noexcept {
+		return win_reason_;
+	}
 
 	// 查询某方某区域当前卡数。仅允许单区域查询（loc 需是 LOCATION_* 单位标志位）。
 	[[nodiscard]] std::uint32_t query_count(std::uint8_t team, std::uint32_t location) const;
@@ -107,6 +117,9 @@ private:
 	// 只有召唤/盖放动作的紧随后续区域选择才允许确定性自动选区。
 	// 效果处理产生的选区必须交回上层，避免擅自替玩家决定效果目标。
 	bool allow_auto_select_place_ = false;
+	std::array<std::int32_t, 2> life_points_{8000, 8000};
+	int winner_ = -1;
+	int win_reason_ = -1;
 
 	[[nodiscard]] ProcessResult process_once();
 };

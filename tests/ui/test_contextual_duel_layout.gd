@@ -12,11 +12,20 @@ var _battle_events: Array = []
 class FakeBridge:
 	extends RefCounted
 
+	var game_over := false
+	var winner := -1
+	var win_reason := -1
+	var idle_actions: Array = []
+
 	func get_duel_state() -> Dictionary:
 		return {
 			"ok": true,
+			"game_over": game_over,
+			"winner": winner,
+			"win_reason": win_reason,
 			"players": {
 				"p1": {
+					"lp": 7600,
 					"deck": 35,
 					"hand": 5,
 					"extra": 0,
@@ -27,6 +36,7 @@ class FakeBridge:
 					"spell_trap_cards": [],
 				},
 				"p2": {
+					"lp": 4200,
 					"deck": 35,
 					"hand": 5,
 					"extra": 0,
@@ -43,7 +53,7 @@ class FakeBridge:
 			"kind": "idle",
 			"player": 0,
 			"can_end_turn": true,
-			"idle_actions": [],
+			"idle_actions": idle_actions,
 			"message_type": 11,
 		}
 
@@ -253,6 +263,24 @@ func _run() -> void:
 	if board.find_child("PhaseButton", true, false).disabled:
 		_fail("Main 必须把本地回合和可结束回合能力写入快照")
 		return
+	if !"LP 7600" in board.player_stats_label.text or !"LP 4200" in board.opponent_stats_label.text:
+		_fail("Main 必须显示桥接层提供的真实双方生命值")
+		return
+	main.bridge.game_over = true
+	main.bridge.winner = 0
+	main.bridge.win_reason = 1
+	main.bridge.idle_actions = [matching_action]
+	main._refresh_board("这条提示必须被终局状态覆盖")
+	if board.status_label.text != "对局结束：玩家1获胜":
+		_fail("Main 必须用桥接层胜负状态覆盖普通操作提示")
+		return
+	if !board.phase_button.disabled:
+		_fail("对局结束后必须禁用阶段操作")
+		return
+	board._on_card_selected(card)
+	if action_bar.visible:
+		_fail("对局结束后不能再显示卡牌动作")
+		return
 
 	var real_bridge = YgoCoreBridge.new()
 	var initialized: Dictionary = real_bridge.initialize_card_database(
@@ -267,19 +295,19 @@ func _run() -> void:
 		_fail("本地玩家门禁测试无法建立真实决斗：" + str(setup.message))
 		return
 	var first_end: Dictionary = real_bridge.submit_end_turn()
-	if !first_end.ok or int(real_bridge.get_pending_action().player) != 1:
-		_fail("真实决斗未能推进到玩家2决策")
+	var next_pending: Dictionary = real_bridge.get_pending_action()
+	if !first_end.ok or int(next_pending.player) != 0:
+		_fail("确定性对手必须自动结束回合并返回本地玩家决策")
 		return
-	for method_name in [
-		"submit_end_turn",
-		"submit_enter_battle",
-		"submit_enter_main2",
-		"submit_end_battle",
-	]:
-		var rejected: Dictionary = real_bridge.call(method_name)
-		if rejected.ok or str(rejected.message) != "当前不是本地玩家的操作回合":
-			_fail("阶段接口未拒绝代替玩家2操作：" + method_name)
-			return
+	var continued_state: Dictionary = real_bridge.get_duel_state()
+	if (
+		int(continued_state.players.p1.deck) != 34
+		or int(continued_state.players.p1.hand) != 6
+		or int(continued_state.players.p1.lp) != 8000
+		or int(continued_state.players.p2.lp) != 8000
+	):
+		_fail("连续回合快照没有反映双方抽牌与真实生命值")
+		return
 	real_bridge.destroy_duel()
 
 	main.free()

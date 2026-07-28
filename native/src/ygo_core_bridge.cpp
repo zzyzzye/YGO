@@ -165,17 +165,43 @@ godot::Dictionary process_result_to_dictionary(const ProcessResult &result) {
 	return response;
 }
 
-ProcessResult advance_to_player_decision(DuelSession &session, ProcessResult result) {
-	// 通知消息会让 OCG_DuelProcess 返回 CONTINUE，但并不需要界面决策。
-	// 设置有限上限，既能穿过开局/换阶段通知，也防止异常规则脚本无限推进。
-	constexpr int max_steps = 100;
+ProcessResult advance_to_local_decision(DuelSession &session, ProcessResult result) {
+	// 当前单机原型固定玩家1为本地玩家。玩家2暂用最保守的确定性策略：
+	// 不发动、不召唤，遇到空闲阶段直接结束回合；若未来从其他流程进入战斗
+	// 阶段则直接结束战斗阶段。该策略只调用已经校验的会话语义接口，绝不
+	// 拼装原始响应，也不会替本地玩家跨过任何决策。
+	constexpr int max_steps = 200;
 	for (int step_index = 0;
 			step_index < max_steps
 			&& result.ok
-			&& result.status != OCG_DUEL_STATUS_END
-			&& result.pending_action.kind == PendingActionKind::None;
+			&& result.status != OCG_DUEL_STATUS_END;
 			++step_index) {
-		result = session.step();
+		if (result.pending_action.kind == PendingActionKind::None) {
+			result = session.step();
+			continue;
+		}
+		if (result.pending_action.player != 1) {
+			break;
+		}
+		if (result.pending_action.kind == PendingActionKind::Idle
+				&& result.pending_action.can_end_turn) {
+			result = session.submit_end_turn();
+			continue;
+		}
+		if (result.pending_action.kind == PendingActionKind::Battle
+				&& result.pending_action.can_end_battle) {
+			result = session.submit_end_battle();
+			continue;
+		}
+		break;
+	}
+	// 达到保险上限却仍没有可交互决策，说明规则消息链异常过长。
+	// 明确向 Godot 报错，避免界面收到 ok=true 后停在无法操作的空状态。
+	if (result.ok
+			&& result.status != OCG_DUEL_STATUS_END
+			&& result.pending_action.kind == PendingActionKind::None) {
+		result.ok = false;
+		result.message = "自动推进超过 200 步，仍未得到可操作决策";
 	}
 	return result;
 }
@@ -410,7 +436,7 @@ godot::Dictionary YgoCoreBridge::setup_duel(
 		return response;
 	}
 
-	const ProcessResult started = advance_to_player_decision(*session_, session_->start());
+	const ProcessResult started = advance_to_local_decision(*session_, session_->start());
 	response["ok"] = true;
 	response["status"] = started.status;
 	response["message"] = godot::String("决斗设置并启动完成");
@@ -432,7 +458,7 @@ godot::Dictionary YgoCoreBridge::start_duel() {
 	}
 
 	return process_result_to_dictionary(
-			advance_to_player_decision(*session_, session_->step()));
+			advance_to_local_decision(*session_, session_->step()));
 }
 
 godot::Dictionary YgoCoreBridge::send_duel_response(
@@ -446,7 +472,7 @@ godot::Dictionary YgoCoreBridge::send_duel_response(
 
 	session_->set_response(response_data.ptr(), response_data.size());
 	return process_result_to_dictionary(
-			advance_to_player_decision(*session_, session_->step()));
+			advance_to_local_decision(*session_, session_->step()));
 }
 
 godot::Dictionary YgoCoreBridge::get_pending_action() const {
@@ -471,6 +497,11 @@ godot::Dictionary YgoCoreBridge::submit_end_turn() {
 				{},
 		});
 	}
+	if (session_->winner() >= 0) {
+		return process_result_to_dictionary({
+				false, OCG_DUEL_STATUS_END, "决斗已经结束，不能继续提交动作",
+				session_->pending_action()});
+	}
 	if (session_->pending_action().player != 0) {
 		return process_result_to_dictionary({
 				false,
@@ -484,12 +515,17 @@ godot::Dictionary YgoCoreBridge::submit_end_turn() {
 		return process_result_to_dictionary(result);
 	}
 	return process_result_to_dictionary(
-			advance_to_player_decision(*session_, result));
+			advance_to_local_decision(*session_, result));
 }
 
 godot::Dictionary YgoCoreBridge::submit_enter_battle() {
 	if (!session_ || !session_->is_active()) {
 		return process_result_to_dictionary({false, OCG_DUEL_STATUS_END, "决斗尚未创建", {}});
+	}
+	if (session_->winner() >= 0) {
+		return process_result_to_dictionary({
+				false, OCG_DUEL_STATUS_END, "决斗已经结束，不能继续提交动作",
+				session_->pending_action()});
 	}
 	if (session_->pending_action().player != 0) {
 		return process_result_to_dictionary({
@@ -498,13 +534,18 @@ godot::Dictionary YgoCoreBridge::submit_enter_battle() {
 	}
 	const ProcessResult result = session_->submit_enter_battle();
 	return result.ok
-			? process_result_to_dictionary(advance_to_player_decision(*session_, result))
+			? process_result_to_dictionary(advance_to_local_decision(*session_, result))
 			: process_result_to_dictionary(result);
 }
 
 godot::Dictionary YgoCoreBridge::submit_enter_main2() {
 	if (!session_ || !session_->is_active()) {
 		return process_result_to_dictionary({false, OCG_DUEL_STATUS_END, "决斗尚未创建", {}});
+	}
+	if (session_->winner() >= 0) {
+		return process_result_to_dictionary({
+				false, OCG_DUEL_STATUS_END, "决斗已经结束，不能继续提交动作",
+				session_->pending_action()});
 	}
 	if (session_->pending_action().player != 0) {
 		return process_result_to_dictionary({
@@ -513,13 +554,18 @@ godot::Dictionary YgoCoreBridge::submit_enter_main2() {
 	}
 	const ProcessResult result = session_->submit_enter_main2();
 	return result.ok
-			? process_result_to_dictionary(advance_to_player_decision(*session_, result))
+			? process_result_to_dictionary(advance_to_local_decision(*session_, result))
 			: process_result_to_dictionary(result);
 }
 
 godot::Dictionary YgoCoreBridge::submit_end_battle() {
 	if (!session_ || !session_->is_active()) {
 		return process_result_to_dictionary({false, OCG_DUEL_STATUS_END, "决斗尚未创建", {}});
+	}
+	if (session_->winner() >= 0) {
+		return process_result_to_dictionary({
+				false, OCG_DUEL_STATUS_END, "决斗已经结束，不能继续提交动作",
+				session_->pending_action()});
 	}
 	if (session_->pending_action().player != 0) {
 		return process_result_to_dictionary({
@@ -528,7 +574,7 @@ godot::Dictionary YgoCoreBridge::submit_end_battle() {
 	}
 	const ProcessResult result = session_->submit_end_battle();
 	return result.ok
-			? process_result_to_dictionary(advance_to_player_decision(*session_, result))
+			? process_result_to_dictionary(advance_to_local_decision(*session_, result))
 			: process_result_to_dictionary(result);
 }
 
@@ -542,6 +588,11 @@ godot::Dictionary YgoCoreBridge::submit_idle_action(
 				"决斗尚未创建",
 				{},
 		});
+	}
+	if (session_->winner() >= 0) {
+		return process_result_to_dictionary({
+				false, OCG_DUEL_STATUS_END, "决斗已经结束，不能继续提交动作",
+				session_->pending_action()});
 	}
 	if (index < 0) {
 		return process_result_to_dictionary({
@@ -589,7 +640,7 @@ godot::Dictionary YgoCoreBridge::submit_idle_action(
 		return process_result_to_dictionary(result);
 	}
 	return process_result_to_dictionary(
-			advance_to_player_decision(*session_, result));
+			advance_to_local_decision(*session_, result));
 }
 
 godot::Dictionary YgoCoreBridge::submit_battle_action(
@@ -597,6 +648,11 @@ godot::Dictionary YgoCoreBridge::submit_battle_action(
 		const std::int64_t index) {
 	if (!session_ || !session_->is_active()) {
 		return process_result_to_dictionary({false, OCG_DUEL_STATUS_END, "决斗尚未创建", {}});
+	}
+	if (session_->winner() >= 0) {
+		return process_result_to_dictionary({
+				false, OCG_DUEL_STATUS_END, "决斗已经结束，不能继续提交动作",
+				session_->pending_action()});
 	}
 	if (index < 0 || session_->pending_action().player != 0) {
 		return process_result_to_dictionary({
@@ -623,7 +679,7 @@ godot::Dictionary YgoCoreBridge::submit_battle_action(
 	const ProcessResult result =
 			session_->submit_battle_action(kind, static_cast<std::size_t>(index));
 	return result.ok
-			? process_result_to_dictionary(advance_to_player_decision(*session_, result))
+			? process_result_to_dictionary(advance_to_local_decision(*session_, result))
 			: process_result_to_dictionary(result);
 }
 
@@ -637,6 +693,7 @@ godot::Dictionary YgoCoreBridge::get_duel_state() const {
 
 	auto collect_state = [this](std::uint8_t team) {
 		godot::Dictionary state;
+		state["lp"] = static_cast<std::int64_t>(session_->life_points(team));
 		state["deck"] = static_cast<std::int64_t>(
 				session_->query_count(team, LOCATION_DECK));
 		state["hand"] = static_cast<std::int64_t>(
@@ -675,6 +732,9 @@ godot::Dictionary YgoCoreBridge::get_duel_state() const {
 	response["ok"] = true;
 	response["message"] = godot::String("决斗状态读取成功");
 	response["players"] = players;
+	response["game_over"] = session_->winner() >= 0;
+	response["winner"] = session_->winner();
+	response["win_reason"] = session_->win_reason();
 	return response;
 }
 

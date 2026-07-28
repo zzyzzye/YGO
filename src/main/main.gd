@@ -66,8 +66,9 @@ func _refresh_board(status_text: String) -> void:
 		board.show_status("读取决斗状态失败：" + str(state.message))
 		return
 
+	var game_over := bool(state.get("game_over", false))
 	var actions: Array = []
-	if int(pending.player) == 0:
+	if !game_over and int(pending.player) == 0:
 		actions = (
 			pending.get("battle_actions", [])
 			if str(pending.kind) == "battle"
@@ -75,6 +76,14 @@ func _refresh_board(status_text: String) -> void:
 		)
 	var player_state: Dictionary = state.players.p1
 	var opponent_state: Dictionary = state.players.p2
+	var effective_status := status_text
+	if game_over:
+		var winner := int(state.get("winner", -1))
+		effective_status = (
+			"对局结束：玩家%s获胜" % [winner + 1]
+			if winner in [0, 1]
+			else "对局结束：平局"
+		)
 	var snapshot := {
 		"player_hand": player_state.get("hand_cards", []),
 		"opponent_hand_count": int(opponent_state.hand),
@@ -82,24 +91,30 @@ func _refresh_board(status_text: String) -> void:
 		"player_spells": player_state.get("spell_trap_cards", []),
 		"opponent_monsters": opponent_state.get("monster_cards", []),
 		"opponent_spells": opponent_state.get("spell_trap_cards", []),
-		"player_stats": "LP 8000　卡组 %s　额外 %s　墓地 %s　除外 %s" % [
+		"player_stats": "LP %s　卡组 %s　额外 %s　墓地 %s　除外 %s" % [
+			player_state.get("lp", 8000),
 			player_state.deck, player_state.extra, player_state.graveyard, player_state.banished,
 		],
-		"opponent_stats": "LP 8000　卡组 %s　额外 %s　墓地 %s　除外 %s" % [
+		"opponent_stats": "LP %s　卡组 %s　额外 %s　墓地 %s　除外 %s" % [
+			opponent_state.get("lp", 8000),
 			opponent_state.deck, opponent_state.extra, opponent_state.graveyard, opponent_state.banished,
 		],
-		# 阶段球只消费明确布尔能力，不解析“玩家1 · 主阶段”等用户可见文本。
-		"local_player_turn": pending.kind in ["idle", "battle"] and int(pending.player) == 0,
+		# MSG_WIN 后 OCGCore 可能仍保留最后一个决策快照；终局标志必须优先
+		# 关闭本地动作，避免玩家在已经结束的决斗上继续提交阶段响应。
+		"local_player_turn": !game_over
+			and pending.kind in ["idle", "battle"]
+			and int(pending.player) == 0,
 		"phase_kind": str(pending.kind),
 		"can_enter_battle": bool(pending.get("can_enter_battle", false)),
 		"can_enter_main2": bool(pending.get("can_enter_main2", false)),
 		"can_end_battle": bool(pending.get("can_end_battle", false)),
 		"can_end_turn": pending.kind == "idle"
+			and !game_over
 			and int(pending.player) == 0
 			and bool(pending.can_end_turn),
 		"idle_actions": actions,
 		"turn_text": _turn_text(pending),
-		"status_text": status_text,
+		"status_text": effective_status,
 		"debug_text": "OCGCore 11.0 · 消息 %s · 玩家1 卡组/手牌 %s/%s · 玩家2 卡组/手牌 %s/%s" % [
 			pending.message_type,
 			player_state.deck,
@@ -129,7 +144,7 @@ func _on_end_turn_requested() -> void:
 	if !response.ok:
 		board.show_status("结束回合失败：" + str(response.message))
 		return
-	_refresh_board("玩家1回合结束，玩家2已抽牌")
+	_refresh_board("对手已自动结束回合，玩家1进入下一回合")
 
 func _on_enter_battle_requested() -> void:
 	_submit_phase_action("submit_enter_battle", "已进入战斗阶段")

@@ -415,6 +415,9 @@ PendingAction parse_pending_action(
 	}
 
 	ByteReader stream(data, size);
+	std::vector<LifePointEvent> life_point_events;
+	int winner = -1;
+	int win_reason = -1;
 	while (stream.remaining() > 0) {
 		std::uint32_t frame_size = 0;
 		if (!stream.read_u32(frame_size) || frame_size == 0
@@ -429,7 +432,45 @@ PendingAction parse_pending_action(
 		}
 
 		const std::uint8_t *frame = stream.current();
-		if (frame[0] == MSG_SELECT_IDLECMD) {
+		if (frame[0] == MSG_DAMAGE
+				|| frame[0] == MSG_RECOVER
+				|| frame[0] == MSG_LPUPDATE) {
+			ByteReader notification(frame, frame_size);
+			std::uint8_t type = 0;
+			std::uint8_t player = 0;
+			std::uint32_t amount = 0;
+			if (!notification.read_u8(type)
+					|| !notification.read_u8(player)
+					|| !notification.read_u32(amount)
+					|| player > 1) {
+				return {
+						PendingActionKind::Malformed,
+						-1,
+						false,
+						static_cast<int>(frame[0]),
+						"生命值通知消息长度不足或玩家编号非法",
+				};
+			}
+			LifePointEventKind kind = LifePointEventKind::Set;
+			if (type == MSG_DAMAGE) {
+				kind = LifePointEventKind::Damage;
+			} else if (type == MSG_RECOVER) {
+				kind = LifePointEventKind::Recover;
+			}
+			life_point_events.push_back({kind, player, amount});
+		} else if (frame[0] == MSG_WIN) {
+			if (frame_size < 3 || frame[1] > 2) {
+				return {
+						PendingActionKind::Malformed,
+						-1,
+						false,
+						MSG_WIN,
+						"胜负通知消息长度不足或胜者编号非法",
+				};
+			}
+			winner = frame[1];
+			win_reason = frame[2];
+		} else if (frame[0] == MSG_SELECT_IDLECMD) {
 			pending = parse_idle_message(frame, frame_size);
 		} else if (frame[0] == MSG_SELECT_BATTLECMD) {
 			pending = parse_battle_message(frame, frame_size);
@@ -464,6 +505,9 @@ PendingAction parse_pending_action(
 			};
 		}
 	}
+	pending.life_point_events = std::move(life_point_events);
+	pending.winner = winner;
+	pending.win_reason = win_reason;
 	return pending;
 }
 

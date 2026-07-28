@@ -66,6 +66,20 @@ struct BattleAction {
 	bool direct_attackable = false;
 };
 
+enum class LifePointEventKind {
+	Damage,
+	Recover,
+	Set,
+};
+
+// OCGCore 只通过通知消息公布 LP 变化，没有独立的公开 LP 查询接口。
+// 会话层按消息顺序应用这些事件，因此解析器必须保留原始玩家、数值和语义。
+struct LifePointEvent {
+	LifePointEventKind kind = LifePointEventKind::Set;
+	std::uint8_t player = 0;
+	std::uint32_t amount = 0;
+};
+
 // 描述 OCGCore 当前等待的玩家决策。该值类型不暴露原始缓冲区，调用方只能
 // 根据已经验证的语义字段决定是否显示或提交动作。
 struct PendingAction {
@@ -80,6 +94,9 @@ struct PendingAction {
 	bool can_enter_battle = false;
 	bool can_enter_main2 = false;
 	bool can_end_battle = false;
+	std::vector<LifePointEvent> life_point_events;
+	int winner = -1;
+	int win_reason = -1;
 };
 
 // 解析 OCGCore_DuelGetMessage 返回的完整缓冲区。缓冲区由若干

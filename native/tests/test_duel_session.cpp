@@ -152,6 +152,9 @@ void test_real_direct_attack_is_accepted() {
 	assert(process.pending_action.kind != ygo::PendingActionKind::Retry);
 	assert(process.pending_action.kind != ygo::PendingActionKind::Malformed);
 	assert(process.pending_action.kind != ygo::PendingActionKind::Unsupported);
+	assert(session.life_points(0) < 8000);
+	assert(session.life_points(1) == 8000);
+	assert(session.winner() == -1);
 }
 
 void test_fixed_real_decks_advance_to_second_players_idle_action() {
