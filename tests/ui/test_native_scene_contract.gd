@@ -5,6 +5,7 @@ const THEME_PATH := "res://src/ui/themes/duel_theme.tres"
 const ZONE_SCENE_PATH := "res://src/ui/zone_view.tscn"
 const HAND_SCENE_PATH := "res://src/ui/hand_view.tscn"
 const BOARD_SCENE_PATH := "res://src/duel/duel_board.tscn"
+const MAIN_SCENE_PATH := "res://src/main/main.tscn"
 
 
 func _initialize() -> void:
@@ -12,6 +13,20 @@ func _initialize() -> void:
 
 
 func _run() -> void:
+	# Main 必须在场景资源中持有 DuelBoard，保证编辑器布局、Theme 与节点生命周期
+	# 同真实运行时一致；禁止脚本以裸节点方式绕过原生场景。
+	var main = load(MAIN_SCENE_PATH).instantiate()
+	var main_board = main.find_child("DuelBoard", true, false)
+	if main_board == null or main_board.scene_file_path != BOARD_SCENE_PATH:
+		_fail("Main 必须直接实例化 DuelBoard 原生场景")
+		return
+	main.free()
+	var main_source := FileAccess.get_file_as_string(
+		ProjectSettings.globalize_path("res://src/main/main.gd")
+	)
+	if main_source.contains("DUEL_BOARD_SCRIPT.new()"):
+		_fail("Main 不得继续在运行时创建 DuelBoard")
+		return
 	if !ResourceLoader.exists(THEME_PATH):
 		_fail("缺少决斗界面 Theme 资源")
 		return

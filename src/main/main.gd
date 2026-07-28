@@ -2,17 +2,29 @@ extends Control
 
 const DUEL_SEED = 0x59474f
 const STARTING_DECK_SIZE = 40
-const DUEL_BOARD_SCRIPT = preload("res://src/duel/duel_board.gd")
 
 var bridge: Object
-var board
+# DuelBoard 由 Main 场景直接实例化，唯一节点既是编辑器内可见的布局，也是运行时
+# 快照渲染的唯一目标；测试仍可在未入树的 Main 脚本实例上替换该成员进行注入。
+@onready var board: DuelBoard = %DuelBoard
 
 
 func _ready() -> void:
 	assert(ClassDB.class_exists("YgoCoreBridge"))
 	bridge = ClassDB.instantiate("YgoCoreBridge")
-	board = DUEL_BOARD_SCRIPT.new()
-	add_child(board)
+	_connect_board_signals()
+
+	var initialized: Dictionary = bridge.call(
+		"initialize_card_database",
+		ProjectSettings.globalize_path("res://")
+	)
+	assert(initialized.ok)
+	_start_duel(DUEL_SEED)
+
+
+func _connect_board_signals() -> void:
+	# 所有界面意图都先经由 DuelBoard 信号转交 Bridge；集中绑定可保证场景实例
+	# 与测试注入对象使用相同的规则入口，界面不会自行改写决斗快照。
 	board.idle_action_requested.connect(_on_idle_action_requested)
 	board.battle_action_requested.connect(_on_battle_action_requested)
 	board.end_turn_requested.connect(_on_end_turn_requested)
@@ -21,13 +33,6 @@ func _ready() -> void:
 	board.end_battle_requested.connect(_on_end_battle_requested)
 	board.restart_requested.connect(_on_restart_requested)
 	board.exit_requested.connect(_on_exit_requested)
-
-	var initialized: Dictionary = bridge.call(
-		"initialize_card_database",
-		ProjectSettings.globalize_path("res://")
-	)
-	assert(initialized.ok)
-	_start_duel(DUEL_SEED)
 
 
 func _start_duel(duel_seed: int) -> void:

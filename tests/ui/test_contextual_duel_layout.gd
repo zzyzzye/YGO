@@ -4,6 +4,7 @@ const HAND_VIEW_SCENE = preload("res://src/ui/hand_view.tscn")
 const ZONE_VIEW_SCENE = preload("res://src/ui/zone_view.tscn")
 const CARD_SCENE_PATH := "res://src/ui/card_view.tscn"
 const DUEL_BOARD_SCENE = preload("res://src/duel/duel_board.tscn")
+const MAIN_SCENE = preload("res://src/main/main.tscn")
 const MAIN_SCRIPT = preload("res://src/main/main.gd")
 
 var _selected_events: Array = []
@@ -68,6 +69,14 @@ func _initialize() -> void:
 
 
 func _run() -> void:
+	# Main 的测试注入仍直接调用 _refresh_board；真实场景则必须提供同一个唯一
+	# DuelBoard 节点，避免测试与运行时走出两套节点来源。
+	var main_scene = MAIN_SCENE.instantiate()
+	var scene_board = main_scene.find_child("DuelBoard", true, false)
+	if scene_board == null or scene_board.scene_file_path != DUEL_BOARD_SCENE.resource_path:
+		_fail("Main 场景必须提供真实 DuelBoard 供运行时与测试共用")
+		return
+	main_scene.free()
 	# HandView 的固定容器样式属于原生场景；测试必须像真实界面一样实例化场景。
 	var hand: HandView = HAND_VIEW_SCENE.instantiate()
 	root.add_child(hand)
