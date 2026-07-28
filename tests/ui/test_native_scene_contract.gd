@@ -4,6 +4,7 @@ const CARD_SCENE_PATH := "res://src/ui/card_view.tscn"
 const THEME_PATH := "res://src/ui/themes/duel_theme.tres"
 const ZONE_SCENE_PATH := "res://src/ui/zone_view.tscn"
 const HAND_SCENE_PATH := "res://src/ui/hand_view.tscn"
+const BOARD_SCENE_PATH := "res://src/duel/duel_board.tscn"
 
 
 func _initialize() -> void:
@@ -43,6 +44,28 @@ func _run() -> void:
 		_fail("CardView 正面模式必须隐藏卡背视觉和文字")
 		return
 	card.queue_free()
+	await process_frame
+	if !ResourceLoader.exists(BOARD_SCENE_PATH):
+		_fail("缺少 DuelBoard 原生场景")
+		return
+	var board = load(BOARD_SCENE_PATH).instantiate()
+	root.add_child(board)
+	await process_frame
+	for node_name in [
+		"Background", "SafeArea", "Battlefield", "OpponentHand",
+		"OpponentSpellRow", "OpponentMonsterRow", "TurnLabel",
+		"PlayerMonsterRow", "PlayerSpellRow", "PlayerHand",
+		"OpponentStatus", "PlayerStatus", "PhaseButton", "SystemTools",
+		"StatusToast", "CardDetailOverlay", "ContextActionBar",
+		"ConfirmationOverlay", "DebugOverlay", "AnimationPlayer",
+	]:
+		if board.find_child(node_name, true, false) == null:
+			_fail("DuelBoard 缺少固定节点：" + node_name)
+			return
+	if board.has_method("_build_interface"):
+		_fail("DuelBoard 不得继续用脚本动态拼装固定界面")
+		return
+	board.queue_free()
 	await process_frame
 	for scene_path in [ZONE_SCENE_PATH, HAND_SCENE_PATH]:
 		if !ResourceLoader.exists(scene_path):

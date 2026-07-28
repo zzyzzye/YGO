@@ -3,7 +3,7 @@ extends SceneTree
 const HAND_VIEW_SCENE = preload("res://src/ui/hand_view.tscn")
 const ZONE_VIEW_SCENE = preload("res://src/ui/zone_view.tscn")
 const CARD_SCENE_PATH := "res://src/ui/card_view.tscn"
-const DUEL_BOARD_SCRIPT = preload("res://src/duel/duel_board.gd")
+const DUEL_BOARD_SCENE = preload("res://src/duel/duel_board.tscn")
 const MAIN_SCRIPT = preload("res://src/main/main.gd")
 
 var _selected_events: Array = []
@@ -137,7 +137,9 @@ func _run() -> void:
 		_fail("再次点击同一卡牌必须发出空字典以取消选择")
 		return
 
-	var board = DUEL_BOARD_SCRIPT.new()
+	# 决斗场的固定节点、主题和信号绑定属于原生场景契约；交互测试先固定
+	# PackedScene 消费方式，Main 的同路径集成由后续迁移任务负责。
+	var board: DuelBoard = DUEL_BOARD_SCENE.instantiate()
 	root.add_child(board)
 	await process_frame
 	board.battle_action_requested.connect(
