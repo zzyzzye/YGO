@@ -116,6 +116,19 @@ godot::Dictionary pending_action_to_dictionary(const PendingAction &pending) {
 	}
 	response["battle_actions"] = battle_actions;
 
+	// MSG_SELECT_PLACE 的 forbidden 位图已在解析器转换为逐项语义候选。桥接层
+	// 只能原样发布控制者、区域和序号，不能让 Godot 重新推导位图或默认选区。
+	// 即使当前不是区域选择，也始终提供空数组以维持稳定 Dictionary 契约。
+	godot::Array place_options;
+	for (const PlaceOption &option : pending.place_options) {
+		godot::Dictionary item;
+		item["controller"] = option.player;
+		item["location"] = option.location;
+		item["sequence"] = option.sequence;
+		place_options.push_back(item);
+	}
+	response["place_options"] = place_options;
+
 	// 选择元数据始终存在，使 Godot 对非选择决策也能用相同 get/default
 	// 契约读取；description 保留 OCGCore 的 64 位描述编号，不在桥接层解释。
 	response["description"] = static_cast<std::int64_t>(pending.description);

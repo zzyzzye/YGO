@@ -717,6 +717,48 @@ godot::Dictionary YgoCoreBridge::pass_chain() {
 			: process_result_to_dictionary(result);
 }
 
+godot::Dictionary YgoCoreBridge::submit_place(
+		const std::int64_t controller,
+		const std::int64_t location,
+		const std::int64_t sequence) {
+	// Godot int 是有符号 64 位，而 MSG_SELECT_PLACE 的三元组均为 uint8。
+	// 必须在访问或窄化参数前统一拒绝越界值，防止负数/256 被截断成另一个
+	// 合法控制者、区域或序号，从而伪造未在当前快照中出现的请求。
+	if (controller < 0 || controller > std::numeric_limits<std::uint8_t>::max()
+			|| location < 0 || location > std::numeric_limits<std::uint8_t>::max()
+			|| sequence < 0 || sequence > std::numeric_limits<std::uint8_t>::max()) {
+		return process_result_to_dictionary({
+				false,
+				OCG_DUEL_STATUS_AWAITING,
+				"区域选择参数超出 OCGCore 协议范围",
+				session_ ? session_->pending_action() : PendingAction{},
+		});
+	}
+	if (!session_ || !session_->is_active()) {
+		return process_result_to_dictionary({
+				false, OCG_DUEL_STATUS_END, "决斗尚未创建", {}});
+	}
+	if (session_->winner() >= 0) {
+		return process_result_to_dictionary({
+				false, OCG_DUEL_STATUS_END, "决斗已经结束，不能继续提交动作",
+				session_->pending_action()});
+	}
+	// 权限取自当前决策的 player，而非请求的 controller。后者只是区域候选的
+	// 一部分，某些规则允许把卡放到另一方区域，不能被误用为操作权限判断。
+	if (session_->pending_action().player != 0) {
+		return process_result_to_dictionary({
+				false, OCG_DUEL_STATUS_AWAITING, "当前不是本地玩家的操作回合",
+				session_->pending_action()});
+	}
+	const ProcessResult result = session_->submit_place(
+			static_cast<std::uint8_t>(controller),
+			static_cast<std::uint8_t>(location),
+			static_cast<std::uint8_t>(sequence));
+	return result.ok
+			? process_result_to_dictionary(advance_to_local_decision(*session_, result))
+			: process_result_to_dictionary(result);
+}
+
 godot::Dictionary YgoCoreBridge::get_duel_state() const {
 	godot::Dictionary response;
 	if (!session_ || !session_->is_active()) {
@@ -843,6 +885,9 @@ void YgoCoreBridge::_bind_methods() {
 	godot::ClassDB::bind_method(
 			godot::D_METHOD("pass_chain"),
 			&YgoCoreBridge::pass_chain);
+	godot::ClassDB::bind_method(
+			godot::D_METHOD("submit_place", "controller", "location", "sequence"),
+			&YgoCoreBridge::submit_place);
 	godot::ClassDB::bind_method(
 			godot::D_METHOD("get_duel_state"),
 			&YgoCoreBridge::get_duel_state);

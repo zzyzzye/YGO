@@ -71,6 +71,13 @@ public:
 	// 转为 size_t 前拒绝负索引，防止不可信 Godot 参数发生无符号窄化。
 	godot::Dictionary submit_chain(std::int64_t index);
 	godot::Dictionary pass_chain();
+	// 区域选择只接收 PendingAction::place_options 已发布的三元组。Bridge 在
+	// 窄化为 OCGCore 的 uint8 协议字段前验证范围，并以当前 pending player
+	// 作为本地玩家门禁；Godot 不能借此构造或发送任意原始响应字节。
+	godot::Dictionary submit_place(
+			std::int64_t controller,
+			std::int64_t location,
+			std::int64_t sequence);
 	// 返回当前双方场上状态计数（卡组/手牌/怪兽区/魔陷区/墓地/除外区）。
 	godot::Dictionary get_duel_state() const;
 	void destroy_duel();

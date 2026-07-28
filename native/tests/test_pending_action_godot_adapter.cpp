@@ -49,6 +49,10 @@ void test_yes_no_dictionary_contract() {
 	require(converted.has("min_select"), "字典必须始终包含 min_select");
 	require(converted.has("max_select"), "字典必须始终包含 max_select");
 	require(converted.has("card_options"), "字典必须始终包含 card_options");
+	require(converted.has("place_options"), "字典必须始终包含 place_options");
+	require(
+			static_cast<godot::Array>(converted["place_options"]).is_empty(),
+			"非区域选择决策必须发布空区域候选数组");
 }
 
 void test_card_selection_hides_opponent_facedown_identity() {
@@ -131,6 +135,10 @@ void test_place_selection_dictionary_uses_semantic_kind() {
 	ygo::PendingAction pending;
 	pending.kind = ygo::PendingActionKind::SelectPlace;
 	pending.player = 0;
+	pending.place_options = {
+		{0, LOCATION_MZONE, 3},
+		{1, LOCATION_SZONE, 1},
+	};
 
 	const godot::Dictionary converted =
 			ygo::pending_action_to_dictionary(pending);
@@ -138,6 +146,20 @@ void test_place_selection_dictionary_uses_semantic_kind() {
 			static_cast<godot::String>(converted["kind"])
 					== godot::String("select_place"),
 			"区域选择必须使用 select_place kind");
+	const godot::Array options = converted["place_options"];
+	require(options.size() == 2, "区域选择必须保留全部合法候选");
+	const godot::Dictionary local_monster_zone = options[0];
+	const godot::Dictionary opponent_spell_zone = options[1];
+	require(
+			read_int(local_monster_zone, "controller") == 0
+					&& read_int(local_monster_zone, "location") == LOCATION_MZONE
+					&& read_int(local_monster_zone, "sequence") == 3,
+			"本地区域候选必须按控制者、区域和序号完整发布");
+	require(
+			read_int(opponent_spell_zone, "controller") == 1
+					&& read_int(opponent_spell_zone, "location") == LOCATION_SZONE
+					&& read_int(opponent_spell_zone, "sequence") == 1,
+			"对手区域候选必须按控制者、区域和序号完整发布");
 }
 
 void test_chain_dictionary_contract_hides_opponent_facedown_identity() {
@@ -214,6 +236,9 @@ void test_bridge_rejects_negative_selection_before_narrowing() {
 	require(
 			bridge->has_method(godot::StringName("pass_chain")),
 			"pass_chain 必须绑定到 Godot");
+	require(
+			bridge->has_method(godot::StringName("submit_place")),
+			"submit_place 必须绑定到 Godot");
 	// 原始字节响应只为 C++ 兼容测试保留；一旦重新注册到 ClassDB，GDScript
 	// 就能绕过 pending kind、稳定索引和决策代次等语义门禁。
 	require(
@@ -251,6 +276,18 @@ void test_bridge_rejects_negative_selection_before_narrowing() {
 			static_cast<godot::String>(inactive_pass["message"])
 					== godot::String::utf8("决斗尚未创建"),
 			"无活动会话的跳过连锁必须返回中文门禁错误");
+	const godot::Dictionary negative_place = bridge->submit_place(-1, LOCATION_MZONE, 3);
+	require(!static_cast<bool>(negative_place["ok"]), "负区域控制者必须被拒绝");
+	require(
+			static_cast<godot::String>(negative_place["message"])
+					== godot::String::utf8("区域选择参数超出 OCGCore 协议范围"),
+			"负区域控制者必须在窄化前返回中文范围错误");
+	const godot::Dictionary oversized_place = bridge->submit_place(0, 256, 3);
+	require(!static_cast<bool>(oversized_place["ok"]), "超过 uint8 的区域必须被拒绝");
+	require(
+			static_cast<godot::String>(oversized_place["message"])
+					== godot::String::utf8("区域选择参数超出 OCGCore 协议范围"),
+			"超过 uint8 的区域必须在窄化前返回中文范围错误");
 }
 
 void run_contract_tests() {
