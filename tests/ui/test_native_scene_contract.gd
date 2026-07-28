@@ -62,8 +62,86 @@ func _run() -> void:
 		if board.find_child(node_name, true, false) == null:
 			_fail("DuelBoard 缺少固定节点：" + node_name)
 			return
-	if board.has_method("_build_interface"):
-		_fail("DuelBoard 不得继续用脚本动态拼装固定界面")
+	if board.theme == null or board.theme.resource_path != THEME_PATH:
+		_fail("DuelBoard 根节点必须直接应用决斗界面 Theme")
+		return
+	for hand_name in ["OpponentHand", "PlayerHand"]:
+		var board_hand = board.find_child(hand_name, true, false)
+		if board_hand.scene_file_path != HAND_SCENE_PATH:
+			_fail("DuelBoard 手牌节点必须来自 HandView 原生场景：" + hand_name)
+			return
+	for row_name in [
+		"OpponentSpellRow",
+		"OpponentMonsterRow",
+		"PlayerMonsterRow",
+		"PlayerSpellRow",
+	]:
+		var row = board.find_child(row_name, true, false)
+		if row.get_child_count() != 5:
+			_fail("DuelBoard 每个区域行必须固定包含五个卡位：" + row_name)
+			return
+		for board_zone in row.get_children():
+			if board_zone.scene_file_path != ZONE_SCENE_PATH:
+				_fail("DuelBoard 卡位必须来自 ZoneView 原生场景：" + row_name)
+				return
+	var board_source := FileAccess.get_file_as_string(
+		ProjectSettings.globalize_path("res://src/duel/duel_board.gd")
+	)
+	if board_source.is_empty():
+		_fail("无法读取 DuelBoard 脚本以检查固定界面工厂")
+		return
+	for forbidden_factory in [
+		"_build_interface",
+		"_build_battlefield",
+		"_add_zone_row",
+		"_build_player_status",
+		"_make_corner_status",
+		"_build_card_detail_overlay",
+		"_build_context_action_bar",
+		"_build_phase_control",
+		"_build_system_tools",
+		"_make_tool_button",
+		"_build_status_toast",
+		"_build_confirmation_overlay",
+		"_build_debug_overlay",
+		"_panel_style",
+		"_round_button_style",
+	]:
+		if board_source.contains(forbidden_factory):
+			_fail("DuelBoard 不得保留固定界面工厂：" + forbidden_factory)
+			return
+	var opponent_card := {
+		"card_id": 89631139,
+		"sequence": 0,
+		"location": 4,
+		"controller": 0,
+		"cn_name": "对手区域选择门禁测试",
+	}
+	board.current_actions = [{
+		"card_id": opponent_card.card_id,
+		"sequence": opponent_card.sequence,
+		"location": opponent_card.location,
+		"controller": 0,
+		"action_kind": "attack",
+		"index": 0,
+	}]
+	var opponent_action_requests: Array = []
+	board.idle_action_requested.connect(
+		func(_kind: String, _index: int, _card_data: Dictionary) -> void:
+			opponent_action_requests.append(true)
+	)
+	board.battle_action_requested.connect(
+		func(_kind: String, _index: int, _card_data: Dictionary) -> void:
+			opponent_action_requests.append(true)
+	)
+	board.opponent_monster_zones[0].card_selected.emit(opponent_card)
+	if (
+		!board.selected_card.is_empty()
+		or board.action_box.visible
+		or board.action_box.get_child_count() != 0
+		or !opponent_action_requests.is_empty()
+	):
+		_fail("对手区域不得向 DuelBoard 转发卡牌选择")
 		return
 	board.queue_free()
 	await process_frame

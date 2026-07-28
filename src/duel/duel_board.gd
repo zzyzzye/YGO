@@ -180,8 +180,7 @@ func _hide_card_detail() -> void:
 
 
 func _rebuild_action_buttons() -> void:
-	for child in action_box.get_children():
-		child.queue_free()
+	_clear_dynamic_children(action_box)
 	var matched := 0
 	for action in current_actions:
 		if int(action.get("card_id", 0)) != int(selected_card.get("card_id", -1)):
@@ -240,8 +239,7 @@ func _clear_selection() -> void:
 	_hovered_card = {}
 	if player_hand != null:
 		player_hand.clear_selection()
-	for child in action_box.get_children():
-		child.queue_free()
+	_clear_dynamic_children(action_box)
 	action_box.visible = false
 	_hide_card_detail()
 
@@ -252,8 +250,7 @@ func _unlock_selection() -> void:
 	selected_card = {}
 	if player_hand != null:
 		player_hand.clear_selection()
-	for child in action_box.get_children():
-		child.queue_free()
+	_clear_dynamic_children(action_box)
 	action_box.visible = false
 	if _hovered_card.is_empty():
 		_hide_card_detail()
@@ -320,7 +317,20 @@ func _open_phase_options(options: Array) -> void:
 
 
 func _clear_confirmation_buttons() -> void:
-	for child in confirmation_buttons.get_children():
+	_clear_dynamic_children(confirmation_buttons)
+
+
+func _clear_dynamic_children(container: Container) -> void:
+	# queue_free() 只在帧末销毁节点；若不先脱离容器，同帧重建会让旧按钮继续
+	# 参与 Container 排版。旧按钮对象在帧末前仍可被持有，因此还必须断开
+	# pressed 回调，避免已退休的候选动作被测试、输入转发或外部引用再次提交。
+	for child in container.get_children():
+		container.remove_child(child)
+		if child is BaseButton:
+			for connection in child.get_signal_connection_list(&"pressed"):
+				var callback: Callable = connection.get("callable", Callable())
+				if callback.is_valid() and child.is_connected(&"pressed", callback):
+					child.disconnect(&"pressed", callback)
 		child.queue_free()
 
 
@@ -346,6 +356,7 @@ func _emit_phase_action(kind: String) -> void:
 
 func _close_confirmation() -> void:
 	_confirmation_kind = ""
+	_clear_confirmation_buttons()
 	confirmation_overlay.visible = false
 
 

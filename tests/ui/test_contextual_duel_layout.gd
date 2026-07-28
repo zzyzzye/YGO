@@ -10,6 +10,9 @@ var _selected_events: Array = []
 var _hovered_events: Array = []
 var _unhovered_events: Array = []
 var _battle_events: Array = []
+var _idle_events: Array = []
+var _end_turn_events: Array = []
+var _restart_events: Array = []
 
 class FakeBridge:
 	extends RefCounted
@@ -150,6 +153,20 @@ func _run() -> void:
 				"card_id": selected.get("card_id", 0),
 			})
 	)
+	board.idle_action_requested.connect(
+		func(kind: String, index: int, selected: Dictionary) -> void:
+			_idle_events.append({
+				"kind": kind,
+				"index": index,
+				"card_id": selected.get("card_id", 0),
+			})
+	)
+	board.end_turn_requested.connect(func() -> void:
+		_end_turn_events.append(true)
+	)
+	board.restart_requested.connect(func() -> void:
+		_restart_events.append(true)
+	)
 	if board.find_child("LegacyActionPanel", true, false) != null:
 		_fail("情境式布局不能保留右侧永久操作列")
 		return
@@ -220,6 +237,25 @@ func _run() -> void:
 	if str(action_bar.get_child(0).text) != "通常召唤":
 		_fail("情境动作条生成了错误动作")
 		return
+	var retired_action_button: Button = action_bar.get_child(0)
+	var replacement_action := matching_action.duplicate()
+	replacement_action.action_kind = "monster_set"
+	replacement_action.index = 9
+	board.current_actions = [replacement_action]
+	board._on_card_selected(card)
+	var rebuilt_action_texts: Array = []
+	for child in action_bar.get_children():
+		rebuilt_action_texts.append(str(child.text))
+	if rebuilt_action_texts != ["怪兽盖放", "取消"]:
+		_fail("同帧重建动作条后必须立即只保留最新动作和取消按钮")
+		return
+	if retired_action_button.get_parent() != null:
+		_fail("同帧重建动作条时旧按钮必须立即脱离容器")
+		return
+	retired_action_button.pressed.emit()
+	if !_idle_events.is_empty():
+		_fail("已替换的动作按钮不得继续触发旧动作回调")
+		return
 	board._on_card_selected({})
 	if !board.detail_overlay.visible:
 		_fail("取消锁定后，鼠标仍悬停时必须保留临时详情")
@@ -286,6 +322,34 @@ func _run() -> void:
 		phase_option_texts.append(str(child.text))
 	if !phase_option_texts.has("进入主要阶段二") or !phase_option_texts.has("结束战斗阶段"):
 		_fail("战斗阶段选项必须来自 OCGCore 能力")
+		return
+	board._open_phase_options([{"kind": "end_turn", "text": "结束回合"}])
+	var retired_phase_button: Button = board.confirmation_buttons.get_child(0)
+	board._open_confirmation("restart", "确定重新开局？")
+	var rebuilt_confirmation_texts: Array = []
+	for child in board.confirmation_buttons.get_children():
+		rebuilt_confirmation_texts.append(str(child.text))
+	if rebuilt_confirmation_texts != ["确认", "取消"]:
+		_fail("同帧重建确认选项后必须立即只保留最新按钮")
+		return
+	if retired_phase_button.get_parent() != null:
+		_fail("同帧重建确认选项时旧按钮必须立即脱离容器")
+		return
+	retired_phase_button.pressed.emit()
+	if !_end_turn_events.is_empty():
+		_fail("已替换的阶段按钮不得继续触发旧阶段回调")
+		return
+	var retired_confirm_button: Button = board.confirmation_buttons.get_child(0)
+	board._close_confirmation()
+	if board.confirmation_buttons.get_child_count() != 0:
+		_fail("关闭确认层时必须立即清空动态按钮")
+		return
+	if retired_confirm_button.get_parent() != null:
+		_fail("关闭确认层时确认按钮必须立即脱离容器")
+		return
+	retired_confirm_button.pressed.emit()
+	if !_restart_events.is_empty():
+		_fail("已关闭确认层的按钮不得继续触发确认回调")
 		return
 
 	var main = MAIN_SCRIPT.new()
