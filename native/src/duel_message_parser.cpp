@@ -327,6 +327,13 @@ ygo::PendingAction parse_select_card_message(
 			|| max_select > candidate_count) {
 		return malformed_select_card_message();
 	}
+	// 每个 loc_info 在本协议中恰好占 14 字节。使用除法而非乘法比较可避免
+	// candidate_count 为极大值时溢出，并且必须在 reserve 前完成，防止畸形帧
+	// 根据声明数量请求超大内存。
+	constexpr std::size_t card_option_size = 14;
+	if (candidate_count > reader.remaining() / card_option_size) {
+		return malformed_select_card_message();
+	}
 
 	std::vector<ygo::CardSelectionOption> options;
 	options.reserve(candidate_count);
@@ -337,10 +344,16 @@ ygo::PendingAction parse_select_card_message(
 				|| !reader.read_u8(option.controller)
 				|| !reader.read_u8(option.location)
 				|| !reader.read_u32(option.sequence)
-				|| !reader.read_u32(option.position)) {
+				|| !reader.read_u32(option.position)
+				|| option.controller > 1) {
 			return malformed_select_card_message();
 		}
 		options.push_back(option);
+	}
+	// MSG_SELECT_CARD 不定义候选后的扩展字段；留下任何字节都意味着帧格式
+	// 与当前 OCGCore 协议不一致，不能被悄悄接受为同一项玩家决策。
+	if (reader.remaining() != 0) {
+		return malformed_select_card_message();
 	}
 
 	ygo::PendingAction pending{

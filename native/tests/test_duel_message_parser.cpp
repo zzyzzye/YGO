@@ -266,6 +266,49 @@ void test_select_card_rejects_invalid_protocol_fields_without_candidates() {
 	assert_malformed(truncated_option);
 }
 
+void test_select_card_rejects_impossible_candidate_count_before_allocation() {
+	std::vector<std::uint8_t> select{MSG_SELECT_CARD, 0, 0};
+	append_little_endian<std::uint32_t>(select, 0);
+	append_little_endian<std::uint32_t>(select, 0);
+	append_little_endian<std::uint32_t>(select, 0xffffffffU);
+	const std::vector<std::uint8_t> stream = framed(select);
+
+	const ygo::PendingAction pending =
+			ygo::parse_pending_action(stream.data(), stream.size());
+	assert(pending.kind == ygo::PendingActionKind::Malformed);
+	assert(pending.card_options.empty());
+}
+
+void test_select_card_rejects_invalid_second_candidate_controller() {
+	std::vector<std::uint8_t> select{MSG_SELECT_CARD, 0, 0};
+	append_little_endian<std::uint32_t>(select, 1);
+	append_little_endian<std::uint32_t>(select, 1);
+	append_little_endian<std::uint32_t>(select, 2);
+	append_card_option(select, 123, 1, LOCATION_MZONE, 0, POS_FACEUP_ATTACK);
+	append_card_option(select, 456, 2, LOCATION_MZONE, 1, POS_FACEUP_ATTACK);
+	const std::vector<std::uint8_t> stream = framed(select);
+
+	const ygo::PendingAction pending =
+			ygo::parse_pending_action(stream.data(), stream.size());
+	assert(pending.kind == ygo::PendingActionKind::Malformed);
+	assert(pending.card_options.empty());
+}
+
+void test_select_card_rejects_trailing_bytes_after_candidates() {
+	std::vector<std::uint8_t> select{MSG_SELECT_CARD, 0, 0};
+	append_little_endian<std::uint32_t>(select, 1);
+	append_little_endian<std::uint32_t>(select, 1);
+	append_little_endian<std::uint32_t>(select, 1);
+	append_card_option(select, 123, 1, LOCATION_MZONE, 0, POS_FACEUP_ATTACK);
+	select.push_back(0xff);
+	const std::vector<std::uint8_t> stream = framed(select);
+
+	const ygo::PendingAction pending =
+			ygo::parse_pending_action(stream.data(), stream.size());
+	assert(pending.kind == ygo::PendingActionKind::Malformed);
+	assert(pending.card_options.empty());
+}
+
 void test_empty_optional_chain_is_safe_to_auto_pass() {
 	std::vector<std::uint8_t> stream;
 	std::vector<std::uint8_t> chain{
@@ -461,6 +504,9 @@ int main() {
 	test_yes_no_rejects_invalid_player_and_truncated_description();
 	test_select_card_exposes_single_card_candidates();
 	test_select_card_rejects_invalid_protocol_fields_without_candidates();
+	test_select_card_rejects_impossible_candidate_count_before_allocation();
+	test_select_card_rejects_invalid_second_candidate_controller();
+	test_select_card_rejects_trailing_bytes_after_candidates();
 	test_empty_optional_chain_is_safe_to_auto_pass();
 	test_all_idle_list_widths_are_consumed_before_flags();
 	test_invalid_player_is_rejected_for_supported_messages();
