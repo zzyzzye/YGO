@@ -20,6 +20,7 @@ var _attack_target_events: Array = []
 var _card_selection_cancel_events: Array = []
 var _yes_no_events: Array = []
 var _place_events: Array = []
+var _input_viewport: SubViewport
 
 class FakeBridge:
 	extends RefCounted
@@ -318,7 +319,12 @@ func _run() -> void:
 	# 决斗场的固定节点、主题和信号绑定属于原生场景契约；交互测试先固定
 	# PackedScene 消费方式，Main 的同路径集成由后续迁移任务负责。
 	var board: DuelBoard = DUEL_BOARD_SCENE.instantiate()
-	root.add_child(board)
+	_input_viewport = SubViewport.new()
+	_input_viewport.size = Vector2i(1920, 1080)
+	_input_viewport.gui_disable_input = false
+	_input_viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	root.add_child(_input_viewport)
+	_input_viewport.add_child(board)
 	await process_frame
 	board.battle_action_requested.connect(
 		func(kind: String, index: int, selected: Dictionary) -> void:
@@ -1003,23 +1009,38 @@ func _run() -> void:
 			_fail("非候选卡位不得显示区域选择高亮")
 			return
 
-	var place_click := InputEventMouseButton.new()
-	place_click.button_index = MOUSE_BUTTON_LEFT
-	place_click.pressed = true
-	board.player_monster_zones[1].gui_input.emit(place_click)
+	# 所有点击都从 SubViewport 进入真实 GUI 命中链，不能直接 emit
+	# gui_input 或 Button.pressed，否则无法发现覆盖层、mouse_filter 与坐标错误。
+	await _viewport_click(board.player_monster_zones[1])
+	await _viewport_click_position(Vector2(4, 4))
 	if !_place_events.is_empty():
-		_fail("非候选卡位点击不得发出区域请求")
+		_fail("非候选卡位或背景的真实点击不得发出区域请求")
 		return
-	board.opponent_spell_zones[3].gui_input.emit(place_click)
+	await _viewport_click(board.opponent_spell_zones[3], true)
+	if (
+		!_place_events.is_empty()
+		or !board.opponent_spell_zones[3].target_highlight.visible
+	):
+		_fail("double_click=true 的真实输入不得消费活动区域候选")
+		return
+	await _viewport_click(board.opponent_spell_zones[3])
 	if _place_events != [[1, 8, 3, place_generation]]:
-		_fail("区域点击必须原样发出 controller/location/sequence 与当前代次")
+		_fail(
+			"区域点击必须原样发出 controller/location/sequence 与当前代次；"
+			+ "实际事件=%s，候选矩形=%s，悬浮控件=%s"
+			% [
+				_place_events,
+				board.opponent_spell_zones[3].get_global_rect(),
+				_input_viewport.gui_get_hovered_control(),
+			]
+		)
 		return
 	for candidate_zone in place_candidate_zones:
 		if candidate_zone.target_highlight.visible:
 			_fail("第一次区域点击必须立即退休本代全部候选入口")
 			return
 	# 同帧双击和旧代次信号都只能观察到已退休入口；不能把同一规则响应发两次。
-	board.opponent_spell_zones[3].gui_input.emit(place_click)
+	await _viewport_click(board.opponent_spell_zones[3])
 	board.opponent_spell_zones[3].place_requested.emit(place_generation)
 	if _place_events.size() != 1:
 		_fail("区域候选双击或退休节点不得发出第二次请求")
@@ -1055,9 +1076,13 @@ func _run() -> void:
 			_fail("任一候选已占用时必须原子隐藏全部区域候选")
 			return
 	var occupied_card: CardView = board.player_monster_zones[0].card_container.get_child(0)
-	occupied_card.pressed.emit()
-	if _place_events.size() != 1:
-		_fail("已占用候选卡位不得发出区域请求")
+	await _viewport_click(occupied_card)
+	if (
+		_place_events.size() != 1
+		or int(board.selected_card.get("card_id", 0)) != 700001
+		or !occupied_card.selected
+	):
+		_fail("已占用卡位真实点击不得放置，且必须保留原 CardView 选择行为")
 		return
 
 	for malformed_option in [
@@ -1071,6 +1096,16 @@ func _run() -> void:
 			if malformed_candidate_zone.target_highlight.visible:
 				_fail("越界 sequence 或未知 location 必须原子隐藏全部候选")
 				return
+
+	var empty_place_snapshot := place_snapshot.duplicate(true)
+	empty_place_snapshot.place_options = []
+	board.render_snapshot(empty_place_snapshot)
+	var empty_generation: int = board._rule_decision_generation
+	await _viewport_click(board.player_monster_zones[0])
+	board.player_monster_zones[0].place_requested.emit(empty_generation)
+	if _place_events.size() != 1 or _has_place_highlight(board):
+		_fail("空区域候选不得显示或提交，且旧 ZoneView 信号必须失效")
+		return
 
 	board.render_snapshot(place_snapshot)
 	board.render_snapshot({
@@ -1146,10 +1181,58 @@ func _run() -> void:
 	atomic_hand.queue_free()
 	atomic_zone.queue_free()
 	board.queue_free()
+	_input_viewport.queue_free()
 	await process_frame
 	await process_frame
 	print("情境式决斗界面交互契约通过")
 	quit(0)
+
+
+func _has_place_highlight(board: DuelBoard) -> bool:
+	for zone in (
+		board.player_monster_zones
+		+ board.player_spell_zones
+		+ board.opponent_monster_zones
+		+ board.opponent_spell_zones
+	):
+		if (
+			zone.target_highlight.visible
+			and zone.target_highlight.theme_type_variation == &"PlaceCandidate"
+		):
+			return true
+	return false
+
+
+func _viewport_click(control: Control, double_click := false) -> void:
+	await _viewport_click_position(
+		control.get_global_rect().get_center(),
+		double_click
+	)
+
+
+func _viewport_click_position(position: Vector2, double_click := false) -> void:
+	var motion := InputEventMouseMotion.new()
+	motion.position = position
+	motion.global_position = position
+	_input_viewport.push_input(motion)
+	await process_frame
+	var press := InputEventMouseButton.new()
+	press.position = position
+	press.global_position = position
+	press.button_index = MOUSE_BUTTON_LEFT
+	press.button_mask = MOUSE_BUTTON_MASK_LEFT
+	press.pressed = true
+	press.double_click = double_click
+	_input_viewport.push_input(press)
+	await process_frame
+	var release := InputEventMouseButton.new()
+	release.position = position
+	release.global_position = position
+	release.button_index = MOUSE_BUTTON_LEFT
+	release.pressed = false
+	release.double_click = double_click
+	_input_viewport.push_input(release)
+	await process_frame
 
 
 func _fail(message: String) -> void:

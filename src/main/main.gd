@@ -426,7 +426,7 @@ func _on_place_requested(
 	):
 		return
 	# 锁在调用同步 GDExtension 前建立，防止双击或 Bridge 回调重入。DuelBoard
-	# 已退休当前可视入口；失败/Retry 必须重绘同一 pending 才能再次选择。
+	# 已退休当前可视入口；返回后必须从 Bridge 的真实状态重绘才能再次选择。
 	_submission_in_progress = true
 	var response: Dictionary = bridge.call(
 		"submit_place",
@@ -436,10 +436,11 @@ func _on_place_requested(
 	)
 	_submission_in_progress = false
 	if !bool(response.get("ok", false)):
+		# 本地调用失败不是 MSG_RETRY：不得信任返回对象里的 pending_action，
+		# 也不得保留旧代次。统一刷新会重新查询 Bridge 当前 pending 并推进代次，
+		# 使提交前的 ZoneView 信号整体过期。
 		_refresh_board(
-			"区域提交失败：" + str(response.get("message", "未知错误")),
-			_current_pending_action,
-			true
+			"区域提交失败：" + str(response.get("message", "未知错误"))
 		)
 		return
 	if bool(response.get("response_rejected", false)):

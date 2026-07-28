@@ -2,6 +2,8 @@ extends SceneTree
 
 const MAIN_SCENE = preload("res://src/main/main.tscn")
 
+var _input_viewport: SubViewport
+
 
 # FakeBridge 只隔离原生 OCGCore 边界；Main、DuelBoard、ZoneView 场景和输入
 # 路由均使用生产实现。响应夹具完整携带 pending_action，覆盖 Retry 与正常推进。
@@ -29,6 +31,7 @@ class FakeBridge:
 		"response_rejected": false,
 		"message": "区域已提交",
 	}
+	var pending_after_failure: Dictionary = {}
 	var reentrant_submission := Callable()
 
 	func initialize_card_database(_root: String) -> Dictionary:
@@ -92,7 +95,12 @@ class FakeBridge:
 		if callback.is_valid():
 			callback.call()
 		var response := next_result.duplicate(true)
-		if bool(response.get("ok", false)):
+		if !bool(response.get("ok", false)) and !pending_after_failure.is_empty():
+			# 本地失败没有 Retry 的 pending_action 恢复语义；该状态只通过随后
+			# get_pending_action 暴露，用来验证 Main 是否真正重新读取 Bridge。
+			pending = pending_after_failure.duplicate(true)
+			pending_after_failure.clear()
+		elif bool(response.get("ok", false)):
 			if bool(response.get("response_rejected", false)):
 				response["pending_action"] = pending.duplicate(true)
 			else:
@@ -117,7 +125,14 @@ func _run() -> void:
 	var fake := FakeBridge.new()
 	var main = MAIN_SCENE.instantiate()
 	main.bridge = fake
-	root.add_child(main)
+	# 独立 SubViewport 在 headless DisplayServer 下仍执行真实 GUI picking，
+	# 避免根 Window 没有系统鼠标泵时退回直接 emit 控件信号。
+	_input_viewport = SubViewport.new()
+	_input_viewport.size = Vector2i(1920, 1080)
+	_input_viewport.gui_disable_input = false
+	_input_viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	root.add_child(_input_viewport)
+	_input_viewport.add_child(main)
 	await process_frame
 	await process_frame
 	var board: DuelBoard = main.board
@@ -130,23 +145,46 @@ func _run() -> void:
 		_fail("Main 必须把 select_place 候选写入原生 DuelBoard")
 		return
 
+	# 本地 ok=false 不具备 OCGCore Retry 语义：Main 必须重新读取 Bridge 当前
+	# pending 并推进代次，不能强制恢复提交前候选或保留旧代次。
+	fake.next_result = {
+		"ok": false,
+		"response_rejected": false,
+		"message": "测试区域本地提交失败",
+	}
+	fake.pending_after_failure = fake._place_pending([
+		{"controller": 0, "location": 8, "sequence": 2},
+	])
+	await _viewport_click(board.player_monster_zones[0])
+	var failure_generation: int = board._rule_decision_generation
+	if (
+		fake.place_submissions != [[0, 4, 0]]
+		or failure_generation != initial_generation + 1
+		or board.player_monster_zones[0].target_highlight.visible
+		or !board.player_spell_zones[2].target_highlight.visible
+		or str(main._current_pending_action.get("kind", "none")) != "select_place"
+		or main._current_pending_action.get("place_options", []) != [
+			{"controller": 0, "location": 8, "sequence": 2},
+		]
+		or "本地提交失败" not in board.status_label.text
+	):
+		_fail("区域本地失败必须重新读取当前 pending 并推进决策代次")
+		return
+
 	# Retry 前先在 Bridge 内重入同一 Main 信号，验证锁在原生调用之前生效；
-	# 返回后候选恢复但代次不变，旧三元组仍属于同一决策。
+	# 返回后候选恢复且代次不变，与上面的本地失败形成明确对照。
 	fake.next_result = {
 		"ok": true,
 		"response_rejected": true,
 		"message": "OCGCore 拒绝测试区域响应",
 	}
 	fake.reentrant_submission = func() -> void:
-		board.place_requested.emit(0, 4, 0, initial_generation)
-	var click := InputEventMouseButton.new()
-	click.button_index = MOUSE_BUTTON_LEFT
-	click.pressed = true
-	board.player_monster_zones[0].gui_input.emit(click)
+		board.place_requested.emit(0, 8, 2, failure_generation)
+	await _viewport_click(board.player_spell_zones[2])
 	if (
-		fake.place_submissions != [[0, 4, 0]]
-		or board._rule_decision_generation != initial_generation
-		or !board.player_monster_zones[0].target_highlight.visible
+		fake.place_submissions != [[0, 4, 0], [0, 8, 2]]
+		or board._rule_decision_generation != failure_generation
+		or !board.player_spell_zones[2].target_highlight.visible
 		or "重新选择" not in board.status_label.text
 	):
 		_fail("区域 Retry 必须锁住重入、保留代次并重建候选")
@@ -162,11 +200,11 @@ func _run() -> void:
 	fake.next_pending = fake._place_pending([
 		{"controller": 1, "location": 4, "sequence": 4},
 	])
-	board.player_monster_zones[0].gui_input.emit(click)
+	await _viewport_click(board.player_spell_zones[2])
 	var current_generation: int = board._rule_decision_generation
 	if (
-		fake.place_submissions != [[0, 4, 0], [0, 4, 0]]
-		or current_generation != initial_generation + 1
+		fake.place_submissions != [[0, 4, 0], [0, 8, 2], [0, 8, 2]]
+		or current_generation != failure_generation + 1
 		or !board.opponent_monster_zones[4].target_highlight.visible
 	):
 		_fail("正常区域响应必须刷新下一决策并推进代次")
@@ -176,7 +214,7 @@ func _run() -> void:
 	main._submission_in_progress = true
 	board.place_requested.emit(1, 4, 4, current_generation)
 	main._submission_in_progress = false
-	if fake.place_submissions.size() != 2:
+	if fake.place_submissions.size() != 3:
 		_fail("旧代次、非当前候选与提交锁定态不得触碰 Bridge")
 		return
 
@@ -212,6 +250,7 @@ func _run() -> void:
 		return
 
 	main.queue_free()
+	_input_viewport.queue_free()
 	await process_frame
 	print("Main 区域选择与代次安全测试通过")
 	quit(0)
@@ -230,6 +269,40 @@ func _has_place_highlight(board: DuelBoard) -> bool:
 		):
 			return true
 	return false
+
+
+func _viewport_click(control: Control, double_click := false) -> void:
+	await _viewport_click_position(
+		control.get_global_rect().get_center(),
+		double_click
+	)
+
+
+func _viewport_click_position(position: Vector2, double_click := false) -> void:
+	# SubViewport.push_input 进入真实 GUI 命中链；按下与释放分帧，既覆盖
+	# ZoneView 的 gui_input，也覆盖 BaseButton 在释放时发布 pressed。
+	var motion := InputEventMouseMotion.new()
+	motion.position = position
+	motion.global_position = position
+	_input_viewport.push_input(motion)
+	await process_frame
+	var press := InputEventMouseButton.new()
+	press.position = position
+	press.global_position = position
+	press.button_index = MOUSE_BUTTON_LEFT
+	press.button_mask = MOUSE_BUTTON_MASK_LEFT
+	press.pressed = true
+	press.double_click = double_click
+	_input_viewport.push_input(press)
+	await process_frame
+	var release := InputEventMouseButton.new()
+	release.position = position
+	release.global_position = position
+	release.button_index = MOUSE_BUTTON_LEFT
+	release.pressed = false
+	release.double_click = double_click
+	_input_viewport.push_input(release)
+	await process_frame
 
 
 func _fail(message: String) -> void:
