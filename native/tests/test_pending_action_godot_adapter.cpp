@@ -127,6 +127,55 @@ void test_position_selection_dictionary_contract() {
 			"表示形式离散候选不得重排或组合");
 }
 
+void test_chain_dictionary_contract_hides_opponent_facedown_identity() {
+	// 若桥接层遗漏 chain_forced、重排候选，或把对手里侧真实卡号写入
+	// Dictionary，此测试必须失败；这些字段是 Godot 只能据此渲染连锁窗口的
+	// 完整语义边界，不能由界面从 OCGCore 原始消息自行推断。
+	ygo::PendingAction pending;
+	pending.kind = ygo::PendingActionKind::SelectChain;
+	pending.player = 0;
+	pending.chain_forced = true;
+	pending.chain_options = {
+		{7, 111, 0, LOCATION_HAND, 2, POS_FACEDOWN_DEFENSE, 101, 3},
+		{8, 222, 1, LOCATION_SZONE, 3, POS_FACEDOWN_DEFENSE, 202, 4},
+		{9, 333, 1, LOCATION_MZONE, 4, POS_FACEUP_ATTACK, 303, 5},
+	};
+
+	const godot::Dictionary converted =
+			ygo::pending_action_to_dictionary(pending);
+	require(
+			static_cast<godot::String>(converted["kind"])
+					== godot::String("select_chain"),
+			"连锁决策必须使用 select_chain kind");
+	require(
+			static_cast<bool>(converted["chain_forced"]),
+			"强制连锁标记必须透传");
+	const godot::Array options = converted["chain_options"];
+	require(options.size() == 3, "连锁候选数量必须保持不变");
+
+	const godot::Dictionary local_facedown = options[0];
+	const godot::Dictionary opponent_facedown = options[1];
+	const godot::Dictionary opponent_faceup = options[2];
+	for (const godot::Dictionary &option : {
+				local_facedown, opponent_facedown, opponent_faceup}) {
+		require(option.has("index"), "连锁候选必须包含稳定索引");
+		require(option.has("controller"), "连锁候选必须包含控制者");
+		require(option.has("location"), "连锁候选必须包含区域");
+		require(option.has("sequence"), "连锁候选必须包含槽位");
+		require(option.has("position"), "连锁候选必须包含表示形式");
+		require(option.has("description"), "连锁候选必须包含效果描述编号");
+		require(option.has("client_mode"), "连锁候选必须包含客户端模式");
+	}
+	require(read_int(local_facedown, "index") == 7, "连锁候选索引不得重排");
+	require(read_int(local_facedown, "card_id") == 111, "本地里侧连锁候选允许公开卡号");
+	require(
+			!opponent_facedown.has("card_id"),
+			"对手里侧连锁候选不得泄露真实卡号");
+	require(
+			read_int(opponent_faceup, "card_id") == 333,
+			"对手正面连锁候选应公开卡号");
+}
+
 void test_bridge_rejects_negative_selection_before_narrowing() {
 	godot::Ref<ygo::YgoCoreBridge> bridge;
 	bridge.instantiate();
@@ -143,6 +192,12 @@ void test_bridge_rejects_negative_selection_before_narrowing() {
 	require(
 			bridge->has_method(godot::StringName("cancel_card_selection")),
 			"cancel_card_selection 必须绑定到 Godot");
+	require(
+			bridge->has_method(godot::StringName("submit_chain")),
+			"submit_chain 必须绑定到 Godot");
+	require(
+			bridge->has_method(godot::StringName("pass_chain")),
+			"pass_chain 必须绑定到 Godot");
 
 	const godot::Dictionary rejected = bridge->submit_card_selection(-1);
 	require(!static_cast<bool>(rejected["ok"]), "负索引必须被拒绝");
@@ -163,12 +218,25 @@ void test_bridge_rejects_negative_selection_before_narrowing() {
 				&& static_cast<godot::String>(oversized_position["message"])
 						== godot::String::utf8("表示形式超出 OCGCore 协议范围"),
 			"超过 uint32 的表示形式必须在窄化前拒绝");
+	const godot::Dictionary negative_chain = bridge->submit_chain(-1);
+	require(!static_cast<bool>(negative_chain["ok"]), "连锁负索引必须被拒绝");
+	require(
+			static_cast<godot::String>(negative_chain["message"])
+					== godot::String::utf8("连锁候选索引不能为负数"),
+			"连锁负索引必须在无符号窄化前返回明确中文范围错误");
+	const godot::Dictionary inactive_pass = bridge->pass_chain();
+	require(!static_cast<bool>(inactive_pass["ok"]), "无活动会话不得跳过连锁");
+	require(
+			static_cast<godot::String>(inactive_pass["message"])
+					== godot::String::utf8("决斗尚未创建"),
+			"无活动会话的跳过连锁必须返回中文门禁错误");
 }
 
 void run_contract_tests() {
 	test_yes_no_dictionary_contract();
 	test_card_selection_hides_opponent_facedown_identity();
 	test_position_selection_dictionary_contract();
+	test_chain_dictionary_contract_hides_opponent_facedown_identity();
 	test_bridge_rejects_negative_selection_before_narrowing();
 	std::fprintf(stdout, "PendingAction Godot 适配器契约测试通过\n");
 }

@@ -662,6 +662,61 @@ godot::Dictionary YgoCoreBridge::submit_position(const std::int64_t position) {
 			: process_result_to_dictionary(result);
 }
 
+godot::Dictionary YgoCoreBridge::submit_chain(const std::int64_t index) {
+	// Godot 的 int 是有符号 64 位，而 DuelSession 只接受 size_t 候选索引。
+	// 这里必须先诊断负值，不能让 -1 在转换后变成巨大索引并掩盖调用方错误。
+	if (index < 0) {
+		return process_result_to_dictionary({
+				false,
+				OCG_DUEL_STATUS_AWAITING,
+				"连锁候选索引不能为负数",
+				session_ ? session_->pending_action() : PendingAction{},
+		});
+	}
+	if (!session_ || !session_->is_active()) {
+		return process_result_to_dictionary({
+				false, OCG_DUEL_STATUS_END, "决斗尚未创建", {}});
+	}
+	if (session_->winner() >= 0) {
+		return process_result_to_dictionary({
+				false, OCG_DUEL_STATUS_END, "决斗已经结束，不能继续提交动作",
+				session_->pending_action()});
+	}
+	if (session_->pending_action().player != 0) {
+		return process_result_to_dictionary({
+				false, OCG_DUEL_STATUS_AWAITING, "当前不是本地玩家的操作回合",
+				session_->pending_action()});
+	}
+	const ProcessResult result =
+			session_->submit_chain(static_cast<std::size_t>(index));
+	return result.ok
+			? process_result_to_dictionary(advance_to_local_decision(*session_, result))
+			: process_result_to_dictionary(result);
+}
+
+godot::Dictionary YgoCoreBridge::pass_chain() {
+	if (!session_ || !session_->is_active()) {
+		return process_result_to_dictionary({
+				false, OCG_DUEL_STATUS_END, "决斗尚未创建", {}});
+	}
+	if (session_->winner() >= 0) {
+		return process_result_to_dictionary({
+				false, OCG_DUEL_STATUS_END, "决斗已经结束，不能继续提交动作",
+				session_->pending_action()});
+	}
+	if (session_->pending_action().player != 0) {
+		return process_result_to_dictionary({
+				false, OCG_DUEL_STATUS_AWAITING, "当前不是本地玩家的操作回合",
+				session_->pending_action()});
+	}
+	// forced 与当前决策类型由 DuelSession 再次校验；Bridge 只负责将 Godot
+	// 请求限制在本地活动会话，规则响应编码始终留在原生会话层。
+	const ProcessResult result = session_->pass_chain();
+	return result.ok
+			? process_result_to_dictionary(advance_to_local_decision(*session_, result))
+			: process_result_to_dictionary(result);
+}
+
 godot::Dictionary YgoCoreBridge::get_duel_state() const {
 	godot::Dictionary response;
 	if (!session_ || !session_->is_active()) {
@@ -785,6 +840,12 @@ void YgoCoreBridge::_bind_methods() {
 	godot::ClassDB::bind_method(
 			godot::D_METHOD("submit_position", "position"),
 			&YgoCoreBridge::submit_position);
+	godot::ClassDB::bind_method(
+			godot::D_METHOD("submit_chain", "index"),
+			&YgoCoreBridge::submit_chain);
+	godot::ClassDB::bind_method(
+			godot::D_METHOD("pass_chain"),
+			&YgoCoreBridge::pass_chain);
 	godot::ClassDB::bind_method(
 			godot::D_METHOD("get_duel_state"),
 			&YgoCoreBridge::get_duel_state);

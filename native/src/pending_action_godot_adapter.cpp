@@ -56,6 +56,8 @@ const char *pending_action_kind_name(const PendingActionKind kind) {
 		return "select_card";
 	case PendingActionKind::SelectPosition:
 		return "select_position";
+	case PendingActionKind::SelectChain:
+		return "select_chain";
 	case PendingActionKind::AutoPassChain:
 		return "auto_pass_chain";
 	case PendingActionKind::AutoSelectPlace:
@@ -143,6 +145,27 @@ godot::Dictionary pending_action_to_dictionary(const PendingAction &pending) {
 		position_options.push_back(static_cast<std::int64_t>(position));
 	}
 	response["position_options"] = position_options;
+
+	// SelectChain 直接对应 OCGCore 的 MSG_SELECT_CHAIN。每项 index 是当前
+	// 响应窗口的唯一候选索引，description/client_mode 则保留规则层原始语义。
+	// 与卡牌选择一致，对手里侧候选只提供可渲染的槽位信息，绝不泄露 card_id。
+	response["chain_forced"] = pending.chain_forced;
+	godot::Array chain_options;
+	for (const ChainOption &option : pending.chain_options) {
+		godot::Dictionary item;
+		item["index"] = static_cast<std::int64_t>(option.index);
+		item["controller"] = option.controller;
+		item["location"] = option.location;
+		item["sequence"] = static_cast<std::int64_t>(option.sequence);
+		item["position"] = static_cast<std::int64_t>(option.position);
+		item["description"] = static_cast<std::int64_t>(option.description);
+		item["client_mode"] = option.client_mode;
+		if (option.controller == 0 || (option.position & POS_FACEUP) != 0) {
+			item["card_id"] = static_cast<std::int64_t>(option.card_id);
+		}
+		chain_options.push_back(item);
+	}
+	response["chain_options"] = chain_options;
 	return response;
 }
 

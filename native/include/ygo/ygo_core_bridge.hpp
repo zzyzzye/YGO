@@ -65,6 +65,12 @@ public:
 	godot::Dictionary submit_card_selection(std::int64_t index);
 	godot::Dictionary cancel_card_selection();
 	godot::Dictionary submit_position(std::int64_t position);
+	// 连锁候选只能通过本次快照中的稳定索引提交；跳过由 C++ 调用
+	// DuelSession::pass_chain() 构造 int32(-1) 协议响应，Godot 不得拼装原始字节。
+	// 两个入口都会拒绝非本地玩家、终局和无活动会话，submit_chain 还会在
+	// 转为 size_t 前拒绝负索引，防止不可信 Godot 参数发生无符号窄化。
+	godot::Dictionary submit_chain(std::int64_t index);
+	godot::Dictionary pass_chain();
 	// 返回当前双方场上状态计数（卡组/手牌/怪兽区/魔陷区/墓地/除外区）。
 	godot::Dictionary get_duel_state() const;
 	void destroy_duel();
