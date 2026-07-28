@@ -645,36 +645,84 @@ void test_idle_message_exposes_all_six_action_lists() {
 	assert(pending.idle_actions[5].client_mode == 9);
 }
 
-void test_select_place_exposes_first_available_own_monster_zone() {
-	std::vector<std::uint8_t> stream;
+void assert_place_option(
+		const ygo::PlaceOption &option,
+		const std::uint8_t player,
+		const std::uint8_t location,
+		const std::uint8_t sequence) {
+	assert(option.player == player);
+	assert(option.location == location);
+	assert(option.sequence == sequence);
+}
+
+void test_select_place_expands_all_zone_bits_for_both_players() {
+	// forbidden 的低 16 位始终属于决策玩家，高 16 位属于另一方。刻意只
+	// 放开每类区域的首尾位，确保怪兽区 0-6、魔陷区 0-7 的偏移没有错位。
+	constexpr std::uint32_t allowed_bits =
+			(1U << 0U) | (1U << 6U) | (1U << 8U) | (1U << 15U)
+			| (1U << 16U) | (1U << 22U) | (1U << 24U) | (1U << 31U);
 	std::vector<std::uint8_t> place{MSG_SELECT_PLACE, 0, 1};
-	// bit=1 表示不可选：己方怪兽区 0、1 被占用，其余区域全部屏蔽。
-	append_little_endian<std::uint32_t>(place, 0xffffff03U);
-	append_frame(stream, place);
+	append_little_endian<std::uint32_t>(place, ~allowed_bits);
+	const std::vector<std::uint8_t> stream = framed(place);
 
 	const ygo::PendingAction pending =
 			ygo::parse_pending_action(stream.data(), stream.size());
-	assert(pending.kind == ygo::PendingActionKind::AutoSelectPlace);
+	assert(pending.kind == ygo::PendingActionKind::SelectPlace);
 	assert(pending.player == 0);
-	assert(pending.place_options.size() == 5);
-	assert(pending.place_options[0].player == 0);
-	assert(pending.place_options[0].location == LOCATION_MZONE);
-	assert(pending.place_options[0].sequence == 2);
+	assert(pending.place_options.size() == 8);
+	assert_place_option(pending.place_options[0], 0, LOCATION_MZONE, 0);
+	assert_place_option(pending.place_options[1], 0, LOCATION_MZONE, 6);
+	assert_place_option(pending.place_options[2], 0, LOCATION_SZONE, 0);
+	assert_place_option(pending.place_options[3], 0, LOCATION_SZONE, 7);
+	assert_place_option(pending.place_options[4], 1, LOCATION_MZONE, 0);
+	assert_place_option(pending.place_options[5], 1, LOCATION_MZONE, 6);
+	assert_place_option(pending.place_options[6], 1, LOCATION_SZONE, 0);
+	assert_place_option(pending.place_options[7], 1, LOCATION_SZONE, 7);
+}
 
-	std::vector<std::uint8_t> player_two_stream;
-	std::vector<std::uint8_t> player_two_place{MSG_SELECT_PLACE, 1, 1};
-	append_little_endian<std::uint32_t>(player_two_place, 0xfffffffeU);
-	append_frame(player_two_stream, player_two_place);
-	const ygo::PendingAction player_two_pending =
-			ygo::parse_pending_action(
-					player_two_stream.data(),
-					player_two_stream.size());
-	assert(player_two_pending.kind == ygo::PendingActionKind::AutoSelectPlace);
-	// forbidden 的低 16 位永远描述当前选择者；即使玩家2选择，也必须优先
-	// 返回玩家2自己的 0 号怪兽区，不能误把对手区域当成首选项。
-	assert(player_two_pending.place_options[0].player == 1);
-	assert(player_two_pending.place_options[0].location == LOCATION_MZONE);
-	assert(player_two_pending.place_options[0].sequence == 0);
+void test_select_place_keeps_player_two_in_low_forbidden_bits() {
+	// 同一位图在玩家2决策时，低 16 位仍属于玩家2，不能按绝对玩家编号解释。
+	constexpr std::uint32_t allowed_bits = (1U << 3U) | (1U << 25U);
+	std::vector<std::uint8_t> place{MSG_SELECT_PLACE, 1, 1};
+	append_little_endian<std::uint32_t>(place, ~allowed_bits);
+	const std::vector<std::uint8_t> stream = framed(place);
+
+	const ygo::PendingAction pending =
+			ygo::parse_pending_action(stream.data(), stream.size());
+	assert(pending.kind == ygo::PendingActionKind::SelectPlace);
+	assert(pending.place_options.size() == 2);
+	assert_place_option(pending.place_options[0], 1, LOCATION_MZONE, 3);
+	assert_place_option(pending.place_options[1], 0, LOCATION_SZONE, 1);
+}
+
+void test_select_place_rejects_truncated_trailing_empty_and_multi_messages() {
+	const std::vector<std::uint8_t> truncated_stream =
+			framed({MSG_SELECT_PLACE, 0, 1});
+	const ygo::PendingAction truncated = ygo::parse_pending_action(
+			truncated_stream.data(), truncated_stream.size());
+	assert(truncated.kind == ygo::PendingActionKind::Malformed);
+
+	std::vector<std::uint8_t> trailing{MSG_SELECT_PLACE, 0, 1};
+	append_little_endian<std::uint32_t>(trailing, 0xfffffffeU);
+	trailing.push_back(0);
+	const std::vector<std::uint8_t> trailing_stream = framed(trailing);
+	const ygo::PendingAction trailing_pending = ygo::parse_pending_action(
+			trailing_stream.data(), trailing_stream.size());
+	assert(trailing_pending.kind == ygo::PendingActionKind::Malformed);
+
+	std::vector<std::uint8_t> no_options{MSG_SELECT_PLACE, 0, 1};
+	append_little_endian<std::uint32_t>(no_options, 0xffffffffU);
+	const std::vector<std::uint8_t> no_options_stream = framed(no_options);
+	const ygo::PendingAction no_options_pending = ygo::parse_pending_action(
+			no_options_stream.data(), no_options_stream.size());
+	assert(no_options_pending.kind == ygo::PendingActionKind::Malformed);
+
+	std::vector<std::uint8_t> multi{MSG_SELECT_PLACE, 0, 2};
+	append_little_endian<std::uint32_t>(multi, 0U);
+	const std::vector<std::uint8_t> multi_stream = framed(multi);
+	const ygo::PendingAction multi_pending = ygo::parse_pending_action(
+			multi_stream.data(), multi_stream.size());
+	assert(multi_pending.kind == ygo::PendingActionKind::Unsupported);
 }
 
 } // namespace
@@ -705,5 +753,7 @@ int main() {
 	test_all_known_unimplemented_interactions_preserve_message_type();
 	test_retry_has_dedicated_diagnostic_kind();
 	test_idle_message_exposes_all_six_action_lists();
-	test_select_place_exposes_first_available_own_monster_zone();
+	test_select_place_expands_all_zone_bits_for_both_players();
+	test_select_place_keeps_player_two_in_low_forbidden_bits();
+	test_select_place_rejects_truncated_trailing_empty_and_multi_messages();
 }

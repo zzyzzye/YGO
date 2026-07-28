@@ -105,6 +105,29 @@ DuelResponse build_position_response(
 	};
 }
 
+DuelResponse build_place_response(
+		const PendingAction &pending_action,
+		const std::uint8_t player,
+		const std::uint8_t location,
+		const std::uint8_t sequence) {
+	if (pending_action.kind != PendingActionKind::SelectPlace) {
+		return {false, "当前不是区域选择", {}};
+	}
+	const auto candidate = std::find_if(
+			pending_action.place_options.begin(),
+			pending_action.place_options.end(),
+			[player, location, sequence](const PlaceOption &option) {
+				return option.player == player && option.location == location
+						&& option.sequence == sequence;
+			});
+	if (candidate == pending_action.place_options.end()) {
+		return {false, "区域候选不属于当前 OCGCore 候选列表", {}};
+	}
+	// OCGCore 对单区域选择不接受索引或位掩码，而是读取三个原始字节。候选
+	// 已由解析器验证，本层只将完整三元组原样编码，绝不推断或修正卡位。
+	return {true, "", {player, location, sequence}};
+}
+
 DuelResponse build_chain_response(
 		const PendingAction &pending_action,
 		const std::size_t option_index) {

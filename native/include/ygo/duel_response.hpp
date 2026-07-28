@@ -30,6 +30,13 @@ struct DuelResponse {
 [[nodiscard]] DuelResponse build_position_response(
 		const PendingAction &pending_action,
 		std::uint32_t position);
+// MSG_SELECT_PLACE 读取恰好三个字节：决策玩家、区域常量和序号。构造器必须
+// 完整匹配解析快照中的 PlaceOption，拒绝任何只匹配位置或跨玩家伪造的组合。
+[[nodiscard]] DuelResponse build_place_response(
+		const PendingAction &pending_action,
+		std::uint8_t player,
+		std::uint8_t location,
+		std::uint8_t sequence);
 // SelectChain 通过 int32 小端候选索引发动效果；跳过则使用 int32(-1)，但仅
 // 非强制窗口可以构造该响应。两个函数只消费已验证的 PendingAction 快照。
 [[nodiscard]] DuelResponse build_chain_response(

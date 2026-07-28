@@ -570,6 +570,17 @@ ygo::PendingAction parse_select_place_message(
 				"区域选择消息长度不足或玩家编号非法",
 		};
 	}
+	// MSG_SELECT_PLACE 的正文固定只有 player、count、forbidden。尾随字节
+	// 代表协议版本或缓冲区对齐发生偏差，绝不能在仍发布候选的情况下悄悄忽略。
+	if (reader.remaining() != 0) {
+		return {
+				ygo::PendingActionKind::Malformed,
+				-1,
+				false,
+				MSG_SELECT_PLACE,
+				"区域选择消息包含未识别的尾随字节",
+		};
+	}
 	if (count != 1) {
 		return {
 				ygo::PendingActionKind::Unsupported,
@@ -611,11 +622,11 @@ ygo::PendingAction parse_select_place_message(
 		};
 	}
 	ygo::PendingAction pending{
-			ygo::PendingActionKind::AutoSelectPlace,
+			ygo::PendingActionKind::SelectPlace,
 			static_cast<int>(player),
 			false,
 			MSG_SELECT_PLACE,
-			"正在选择第一个合法场地区域",
+			"等待玩家选择放置区域",
 	};
 	pending.place_options = std::move(options);
 	return pending;

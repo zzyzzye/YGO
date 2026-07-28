@@ -265,6 +265,32 @@ void test_chain_pass_rejects_forced_chain() {
 	assert(response.bytes.empty());
 }
 
+void test_place_response_requires_an_exact_current_place_option() {
+	ygo::PendingAction pending;
+	pending.kind = ygo::PendingActionKind::SelectPlace;
+	pending.place_options = {
+			{0, LOCATION_MZONE, 0},
+			{0, LOCATION_MZONE, 3},
+			{1, LOCATION_SZONE, 6},
+	};
+
+	const ygo::DuelResponse valid =
+			ygo::build_place_response(pending, 0, LOCATION_MZONE, 3);
+	assert(valid.ok);
+	assert(valid.bytes
+			== std::vector<std::uint8_t>({0, LOCATION_MZONE, 3}));
+
+	const ygo::DuelResponse missing =
+			ygo::build_place_response(pending, 0, LOCATION_MZONE, 2);
+	assert(!missing.ok);
+	assert(missing.bytes.empty());
+
+	const ygo::DuelResponse wrong_kind =
+			ygo::build_place_response({}, 0, LOCATION_MZONE, 3);
+	assert(!wrong_kind.ok);
+	assert(wrong_kind.bytes.empty());
+}
+
 } // namespace
 
 int main() {
@@ -284,4 +310,5 @@ int main() {
 	test_chain_response_rejects_index_beyond_non_negative_int32_range();
 	test_chain_pass_is_allowed_only_for_non_forced_chain();
 	test_chain_pass_rejects_forced_chain();
+	test_place_response_requires_an_exact_current_place_option();
 }

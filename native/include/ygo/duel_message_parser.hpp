@@ -16,7 +16,10 @@ enum class PendingActionKind {
 	SelectPosition,
 	SelectChain,
 	AutoPassChain,
-	AutoSelectPlace,
+	SelectPlace,
+	// Task 2 会删除自动提交分支；此别名仅保持旧会话源文件在分阶段迁移期间
+	// 可以编译，值与 SelectPlace 完全相同，解析器不会再发布“自动选择”语义。
+	AutoSelectPlace = SelectPlace,
 	Retry,
 	Unsupported,
 	Malformed,
@@ -49,6 +52,9 @@ struct IdleAction {
 	std::uint8_t client_mode = 0;
 };
 
+// MSG_SELECT_PLACE 的一个已经验证的单区域候选。OCGCore forbidden 位图的
+// 低 16 位属于决策玩家、高 16 位属于另一方；解析器在此完成位到语义三元组的
+// 转换，后续 Godot 和响应层只能使用这些值，不能重新解释原始位掩码。
 struct PlaceOption {
 	std::uint8_t player = 0;
 	std::uint8_t location = 0;
@@ -118,6 +124,8 @@ struct PendingAction {
 	int message_type = -1;
 	std::string message = "当前没有待处理的玩家决策";
 	std::vector<IdleAction> idle_actions;
+	// SelectPlace 的完整合法区域表。只有 count=1 且报文无尾随字节时才发布；
+	// 空表或解析失败均以 Malformed 返回，避免调用方把默认位置误提交给核心。
 	std::vector<PlaceOption> place_options;
 	std::vector<BattleAction> battle_actions;
 	bool can_enter_battle = false;
