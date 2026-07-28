@@ -165,6 +165,20 @@ set_target_properties(ygo_core PROPERTIES
 set(PENDING_ACTION_ADAPTER_TEST_PROJECT
 	"${CMAKE_CURRENT_BINARY_DIR}/pending_action_adapter_test_project"
 )
+set(PENDING_ACTION_ADAPTER_TEST_RUNNER
+"extends SceneTree
+
+
+func _initialize() -> void:
+	# Godot 即使加载 GDExtension 失败也可能继续执行脚本并返回 0。
+	# 以正式绑定类作为契约哨兵，防止 CTest 把“测试根本没运行”误判为通过。
+	if !ClassDB.class_exists(\"YgoCoreBridge\"):
+		push_error(\"PendingAction Godot 适配器契约未运行：YgoCoreBridge 未注册\")
+		quit(1)
+		return
+	quit()
+"
+)
 file(MAKE_DIRECTORY "${PENDING_ACTION_ADAPTER_TEST_PROJECT}/.godot")
 add_library(test_pending_action_godot_adapter SHARED
 	src/pending_action_godot_adapter.cpp
@@ -214,28 +228,92 @@ file(GENERATE
 )
 file(GENERATE
 	OUTPUT "${PENDING_ACTION_ADAPTER_TEST_PROJECT}/adapter_test_runner.gd"
+	CONTENT "${PENDING_ACTION_ADAPTER_TEST_RUNNER}"
+)
+
+# 负向测试工程故意引用不存在的动态库。它与正式契约测试共用 runner，
+# 用于证明“扩展没有加载”会成为非零退出，而不是被无条件 quit() 掩盖。
+set(PENDING_ACTION_ADAPTER_MISSING_EXTENSION_TEST_PROJECT
+	"${CMAKE_CURRENT_BINARY_DIR}/pending_action_adapter_missing_extension_test_project"
+)
+file(MAKE_DIRECTORY
+	"${PENDING_ACTION_ADAPTER_MISSING_EXTENSION_TEST_PROJECT}/.godot"
+)
+file(GENERATE
+	OUTPUT "${PENDING_ACTION_ADAPTER_MISSING_EXTENSION_TEST_PROJECT}/project.godot"
 	CONTENT
-"extends SceneTree
+"[application]
 
-
-func _initialize() -> void:
-	# 契约断言在 GDExtension 场景级初始化时执行；脚本只负责干净退出运行时。
-	quit()
+config/name=\"PendingAction 缺失扩展负向测试\"
 "
+)
+file(GENERATE
+	OUTPUT "${PENDING_ACTION_ADAPTER_MISSING_EXTENSION_TEST_PROJECT}/missing.gdextension"
+	CONTENT
+"[configuration]
+
+entry_symbol=\"ygo_pending_action_adapter_test_init\"
+compatibility_minimum=\"4.6\"
+
+[libraries]
+
+macos.debug=\"res://bin/libmissing_pending_action_adapter.dylib\"
+macos.release=\"res://bin/libmissing_pending_action_adapter.dylib\"
+"
+)
+file(GENERATE
+	OUTPUT
+		"${PENDING_ACTION_ADAPTER_MISSING_EXTENSION_TEST_PROJECT}/.godot/extension_list.cfg"
+	CONTENT "res://missing.gdextension\n"
+)
+file(GENERATE
+	OUTPUT
+		"${PENDING_ACTION_ADAPTER_MISSING_EXTENSION_TEST_PROJECT}/adapter_test_runner.gd"
+	CONTENT "${PENDING_ACTION_ADAPTER_TEST_RUNNER}"
 )
 find_program(YGO_GODOT_EXECUTABLE
 	NAMES godot Godot
 	HINTS "/Applications/Godot.app/Contents/MacOS"
 )
-if(YGO_GODOT_EXECUTABLE)
-	add_test(
-		NAME pending_action_godot_adapter
-		COMMAND
-			"${YGO_GODOT_EXECUTABLE}"
-			--headless
-			--path "${PENDING_ACTION_ADAPTER_TEST_PROJECT}"
-			--script res://adapter_test_runner.gd
+if(NOT YGO_GODOT_EXECUTABLE
+		OR NOT EXISTS "${YGO_GODOT_EXECUTABLE}"
+		OR IS_DIRECTORY "${YGO_GODOT_EXECUTABLE}")
+	message(FATAL_ERROR
+		"未找到可执行的 Godot，无法运行 PendingAction 适配器契约测试"
 	)
-else()
-	message(WARNING "未找到 Godot，可构建但不会注册 PendingAction 适配器运行测试")
 endif()
+add_test(
+	NAME pending_action_godot_adapter
+	COMMAND
+		"${YGO_GODOT_EXECUTABLE}"
+		--headless
+		--path "${PENDING_ACTION_ADAPTER_TEST_PROJECT}"
+		--script res://adapter_test_runner.gd
+)
+add_test(
+	NAME pending_action_godot_adapter_requires_extension
+	COMMAND
+		"${YGO_GODOT_EXECUTABLE}"
+		--headless
+		--path "${PENDING_ACTION_ADAPTER_MISSING_EXTENSION_TEST_PROJECT}"
+		--script res://adapter_test_runner.gd
+)
+set_tests_properties(
+	pending_action_godot_adapter_requires_extension
+	PROPERTIES WILL_FAIL TRUE
+)
+
+# 显式传入不存在的 Godot 路径来验证默认构建不会静默跳过契约测试。
+# 修复后的内层 configure 必须失败，因此该 CTest 使用 WILL_FAIL 反转预期。
+add_test(
+	NAME pending_action_godot_adapter_requires_godot
+	COMMAND
+		"${CMAKE_COMMAND}"
+		-S "${CMAKE_CURRENT_SOURCE_DIR}"
+		-B "${CMAKE_CURRENT_BINARY_DIR}/missing_godot_configure_test"
+		-DYGO_GODOT_EXECUTABLE=${CMAKE_CURRENT_BINARY_DIR}/不存在的_godot
+)
+set_tests_properties(
+	pending_action_godot_adapter_requires_godot
+	PROPERTIES WILL_FAIL TRUE
+)
