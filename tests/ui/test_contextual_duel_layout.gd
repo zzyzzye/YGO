@@ -518,7 +518,24 @@ func _run() -> void:
 	):
 		_fail("可取消目标选择必须只显示“取消攻击”按钮")
 		return
-	board.action_box.get_child(0).pressed.emit()
+	board._handle_surface_click(board.turn_label)
+	if (
+		!board.action_box.visible
+		or board.action_box.get_child_count() != 1
+		or str(board.action_box.get_child(0).text) != "取消攻击"
+	):
+		_fail("可取消目标选择期间点击空白不得清除唯一取消入口")
+		return
+	board._on_card_selected(card)
+	if (
+		!board.action_box.visible
+		or board.action_box.get_child_count() != 1
+		or str(board.action_box.get_child(0).text) != "取消攻击"
+	):
+		_fail("可取消目标选择期间选择己方卡不得覆盖唯一取消入口")
+		return
+	var active_rule_cancel_button: Button = board.action_box.get_child(0)
+	active_rule_cancel_button.pressed.emit()
 	if _card_selection_cancel_events.size() != 1:
 		_fail("取消攻击按钮必须发出卡牌选择取消请求")
 		return
@@ -537,8 +554,21 @@ func _run() -> void:
 		or yes_no_texts != ["是", "否"]
 		or direct_attack_highlight.visible
 		or board.opponent_monster_zones[0].target_highlight.visible
+		or board.action_box.visible
+		or board.action_box.get_child_count() != 0
 	):
-		_fail("通用 Yes/No 必须使用确认层，且不得显示攻击目标")
+		_fail("新 Yes/No 快照必须清除攻击目标和上一帧取消入口")
+		return
+	active_rule_cancel_button.pressed.emit()
+	if _card_selection_cancel_events.size() != 1:
+		_fail("新快照清除的旧取消按钮不得继续发出规则请求")
+		return
+	board._handle_surface_click(board.turn_label)
+	yes_no_texts.clear()
+	for child in board.confirmation_buttons.get_children():
+		yes_no_texts.append(str(child.text))
+	if !board.confirmation_overlay.visible or yes_no_texts != ["是", "否"]:
+		_fail("通用 Yes/No 期间点击战场空白不得清除是/否入口")
 		return
 	board.confirmation_buttons.get_child(0).pressed.emit()
 	if _yes_no_events != [true]:
@@ -549,6 +579,14 @@ func _run() -> void:
 		"decision_description": 99,
 		"local_player_turn": true,
 	})
+	var background: Control = board.find_child("Background", true, false)
+	background.gui_input.emit(lp_click)
+	yes_no_texts.clear()
+	for child in board.confirmation_buttons.get_children():
+		yes_no_texts.append(str(child.text))
+	if !board.confirmation_overlay.visible or yes_no_texts != ["是", "否"]:
+		_fail("通用 Yes/No 期间背景输入不得清除是/否入口")
+		return
 	board.confirmation_buttons.get_child(1).pressed.emit()
 	if _yes_no_events != [true, false]:
 		_fail("通用 Yes/No 的“否”必须原样发出 false")

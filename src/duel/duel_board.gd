@@ -54,6 +54,7 @@ var _can_enter_battle := false
 var _can_enter_main2 := false
 var _can_end_battle := false
 var _rule_decision_kind := "none"
+var _card_selection_cancelable := false
 # key 只由 OCGCore 公开的 controller/location/sequence 组成，值是同一决策帧中的
 # 候选 index；卡号不参与映射，避免同名卡或隐藏身份影响规则位置选择。
 var _card_option_indices: Dictionary = {}
@@ -205,7 +206,14 @@ func _show_card_options(snapshot: Dictionary) -> void:
 		var key := _rule_location_key(location)
 		_card_option_indices[key] = int(option.get("index", -1))
 		zone.set_targetable(true)
-	if bool(snapshot.get("selection_cancelable", false)):
+	_card_selection_cancelable = bool(snapshot.get("selection_cancelable", false))
+	_restore_card_selection_cancel()
+
+
+func _restore_card_selection_cancel() -> void:
+	# 规则取消入口属于当前 OCGCore SelectCard 快照，不属于普通卡牌选择动作。
+	# 空白点击或选择己方卡只能清理本地浏览状态，不能让核心仍等待时失去取消能力。
+	if _rule_decision_kind == "select_card" and _card_selection_cancelable:
 		var cancel := Button.new()
 		cancel.text = "取消攻击"
 		cancel.pressed.connect(_emit_card_selection_cancel)
@@ -231,6 +239,7 @@ func _open_yes_no_prompt(description: int) -> void:
 
 func _clear_rule_decision_presentation() -> void:
 	_rule_decision_kind = "none"
+	_card_selection_cancelable = false
 	_card_option_indices.clear()
 	direct_attack_highlight.visible = false
 	for zone in opponent_monster_zones:
@@ -383,6 +392,10 @@ func _hide_card_detail() -> void:
 
 func _rebuild_action_buttons() -> void:
 	_clear_dynamic_children(action_box)
+	if _rule_decision_kind == "select_card":
+		action_box.visible = false
+		_restore_card_selection_cancel()
+		return
 	var matched := 0
 	for action in current_actions:
 		if int(action.get("card_id", 0)) != int(selected_card.get("card_id", -1)):
@@ -444,6 +457,7 @@ func _clear_selection() -> void:
 	_set_field_card_selection(null)
 	_clear_dynamic_children(action_box)
 	action_box.visible = false
+	_restore_card_selection_cancel()
 	_hide_card_detail()
 
 
@@ -456,6 +470,7 @@ func _unlock_selection() -> void:
 	_set_field_card_selection(null)
 	_clear_dynamic_children(action_box)
 	action_box.visible = false
+	_restore_card_selection_cancel()
 	if _hovered_card.is_empty():
 		_hide_card_detail()
 	else:
@@ -590,7 +605,10 @@ func _toggle_debug() -> void:
 func _on_background_input(event: InputEvent) -> void:
 	if event is InputEventMouseButton and event.pressed:
 		_clear_selection()
-		_close_confirmation()
+		# 规则 Yes/No 的按钮是 OCGCore 当前唯一可推进入口；外部点击只能关闭
+		# restart/phase 等本地确认，不能让核心等待期间把规则入口销毁。
+		if _rule_decision_kind != "yes_no":
+			_close_confirmation()
 
 
 func _input(event: InputEvent) -> void:
@@ -608,7 +626,8 @@ func _handle_surface_click(target: Control) -> void:
 		if target == overlay or (target != null and overlay.is_ancestor_of(target)):
 			return
 	_clear_selection()
-	_close_confirmation()
+	if _rule_decision_kind != "yes_no":
+		_close_confirmation()
 
 
 func _unhandled_key_input(event: InputEvent) -> void:
