@@ -563,8 +563,8 @@ ygo::PendingAction parse_select_place_message(
 }
 
 bool requires_player_response(const std::uint8_t message_type) {
-	// 这些消息都对应上游 Processor 的返回缓冲区读取点。当前里程碑只实现
-	// MSG_SELECT_IDLECMD，其余类型必须显式阻断，不能被通知消息过滤逻辑吞掉。
+	// 这些消息都对应上游 Processor 的返回缓冲区读取点。已支持类型会在调用
+	// 本函数前解析；剩余类型必须显式阻断，不能被通知消息过滤逻辑吞掉。
 	switch (message_type) {
 	case MSG_SELECT_BATTLECMD:
 	case MSG_SELECT_EFFECTYN:
