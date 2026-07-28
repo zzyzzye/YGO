@@ -279,10 +279,25 @@ func _assert_populated_layout(
 	scenario_name: String
 ) -> void:
 	var logical_rect := Rect2(Vector2.ZERO, Vector2(LOGICAL_SIZE))
-	var safe_area: Control = board.find_child("SafeArea", true, false)
+	var safe_area_node := board.find_child("SafeArea", true, false)
+	if !(safe_area_node is Control):
+		_fail("决斗场景缺少 SafeArea：窗口 %s，状态 %s" % [
+			physical_size,
+			scenario_name,
+		])
+		return
+	var safe_area := safe_area_node as Control
+	if !_assert_control_geometry(
+		safe_area,
+		logical_rect,
+		logical_rect,
+		physical_size,
+		scenario_name,
+		"SafeArea"
+	):
+		return
 	var safe_rect := safe_area.get_global_rect()
 	var key_control_names := [
-		"SafeArea",
 		"Battlefield",
 		"PlayerHand",
 		"OpponentHand",
@@ -292,48 +307,50 @@ func _assert_populated_layout(
 		"OpponentStatusSurface",
 	]
 	for node_name in key_control_names:
-		var control: Control = board.find_child(node_name, true, false)
-		if (
-			control == null
-			or !control.is_visible_in_tree()
-			or control.size.x <= 0.0
-			or control.size.y <= 0.0
-			or !logical_rect.encloses(control.get_global_rect())
+		if !_assert_control_geometry(
+			board.find_child(node_name, true, false),
+			logical_rect,
+			safe_rect,
+			physical_size,
+			scenario_name,
+			node_name
 		):
-			_fail(
-				"关键控件未完整留在逻辑画布：%s，窗口 %s，状态 %s，矩形 %s"
-				% [
-					node_name,
-					physical_size,
-					scenario_name,
-					control.get_global_rect() if control != null else Rect2(),
-				]
-			)
 			return
-		if node_name != "SafeArea" and !safe_rect.encloses(control.get_global_rect()):
-			_fail(
-				"关键控件离开安全区域：%s，窗口 %s，状态 %s，矩形 %s"
-				% [node_name, physical_size, scenario_name, control.get_global_rect()]
-			)
-			return
-	var action_bar: HBoxContainer = board.action_box
-	var player_hand: HandView = board.player_hand
-	var status: Label = board.status_label
-	var opponent_hand: HandView = board.opponent_hand
-	var tools: HBoxContainer = board.find_child("SystemTools", true, false)
-	var phase: Button = board.phase_button
-	var lp_surface: Control = board.opponent_status_surface
+	var action_bar := board.action_box
+	var player_hand := board.player_hand
+	var status := board.status_label
+	var opponent_hand := board.opponent_hand
+	var tools_node := board.find_child("SystemTools", true, false)
+	if !(tools_node is HBoxContainer):
+		_fail("决斗场景缺少系统工具容器：窗口 %s，状态 %s" % [
+			physical_size,
+			scenario_name,
+		])
+		return
+	var tools := tools_node as HBoxContainer
+	var phase := board.phase_button
 	for themed_control in [
 		{"control": phase, "variation": &"PhaseButton", "name": "阶段球"},
 		{"control": action_bar, "variation": &"ContextActionBarLayout", "name": "动作条"},
 		{"control": tools, "variation": &"SystemToolsLayout", "name": "系统工具"},
 	]:
-		var control: Control = themed_control.control
+		var control := themed_control.control as Control
 		if control.theme_type_variation != themed_control.variation:
 			_fail(
 				"%s 未继承约定 Theme：窗口 %s，状态 %s"
 				% [themed_control.name, physical_size, scenario_name]
 			)
+			return
+	for child_index in range(tools.get_child_count()):
+		var tool_button := tools.get_child(child_index)
+		if !_assert_control_geometry(
+			tool_button,
+			logical_rect,
+			safe_rect,
+			physical_size,
+			scenario_name,
+			"系统按钮 %s" % [child_index + 1]
+		):
 			return
 	if status.get_global_rect().intersects(opponent_hand.get_global_rect()):
 		_fail("状态文字覆盖对手手牌：窗口 %s，状态 %s" % [physical_size, scenario_name])
@@ -345,42 +362,199 @@ func _assert_populated_layout(
 			% [physical_size, scenario_name, status_hand_gap]
 		)
 		return
-	if (
-		board.player_hand.get_child_count() != 6
-		or board.opponent_hand.get_child_count() != 6
-	):
-		_fail("满载案例必须显示双方各六张手牌：窗口 %s，状态 %s" % [
-			physical_size,
-			scenario_name,
-		])
+	var player_hand_result := _assert_hand_cards(
+		player_hand,
+		6,
+		logical_rect,
+		safe_rect,
+		physical_size,
+		scenario_name,
+		"玩家手牌"
+	)
+	if !bool(player_hand_result.ok):
 		return
-	for zone in (
+	var opponent_hand_result := _assert_hand_cards(
+		opponent_hand,
+		6,
+		logical_rect,
+		safe_rect,
+		physical_size,
+		scenario_name,
+		"对手手牌"
+	)
+	if !bool(opponent_hand_result.ok):
+		return
+	var all_zones := (
 		board.player_monster_zones
 		+ board.player_spell_zones
 		+ board.opponent_monster_zones
 		+ board.opponent_spell_zones
+	)
+	for zone_index in range(all_zones.size()):
+		if !_assert_full_zone(
+			all_zones[zone_index],
+			logical_rect,
+			safe_rect,
+			physical_size,
+			scenario_name,
+			"满载卡位 %s" % [zone_index + 1]
+		):
+			return
+	_assert_scenario_layout(board, logical_rect, safe_rect, physical_size, scenario_name)
+	if _failed:
+		return
+	_assert_non_overlapping_layout(
+		board,
+		player_hand_result.rect,
+		opponent_hand_result.rect,
+		physical_size,
+		scenario_name
+	)
+
+
+func _assert_control_geometry(
+	control_value: Variant,
+	logical_rect: Rect2,
+	safe_rect: Rect2,
+	physical_size: Vector2i,
+	scenario_name: String,
+	control_name: String
+) -> bool:
+	# 必须先验证运行时类型，再读取可见性和矩形；缺节点、错误类型、隐藏父节点
+	# 或零尺寸都应成为受控测试失败，不能以空引用中断整个契约。
+	if !(control_value is Control):
+		_fail("%s 不是有效 Control：窗口 %s，状态 %s" % [
+			control_name,
+			physical_size,
+			scenario_name,
+		])
+		return false
+	var control := control_value as Control
+	var rect := control.get_global_rect()
+	if (
+		!control.is_visible_in_tree()
+		or rect.size.x <= 0.0
+		or rect.size.y <= 0.0
+		or !logical_rect.encloses(rect)
+		or !safe_rect.encloses(rect)
 	):
-		if zone.card_container.get_child_count() != 1:
-			_fail("满载怪兽/魔陷卡位必须全部填充：窗口 %s，状态 %s" % [
+		_fail("%s 未完整显示在安全区域：窗口 %s，状态 %s，矩形 %s" % [
+			control_name,
+			physical_size,
+			scenario_name,
+			rect,
+		])
+		return false
+	return true
+
+
+func _assert_hand_cards(
+	hand_value: Variant,
+	expected_count: int,
+	logical_rect: Rect2,
+	safe_rect: Rect2,
+	physical_size: Vector2i,
+	scenario_name: String,
+	hand_name: String
+) -> Dictionary:
+	if !(hand_value is HandView):
+		_fail("%s 缺少真实 HandView：窗口 %s，状态 %s" % [
+			hand_name,
+			physical_size,
+			scenario_name,
+		])
+		return {"ok": false, "rect": Rect2()}
+	var hand := hand_value as HandView
+	if hand.get_child_count() != expected_count:
+		_fail("%s 必须显示 %s 张卡：窗口 %s，状态 %s" % [
+			hand_name,
+			expected_count,
+			physical_size,
+			scenario_name,
+		])
+		return {"ok": false, "rect": Rect2()}
+	var content_rect := Rect2()
+	for card_index in range(expected_count):
+		var card := hand.get_child(card_index)
+		if !(card is CardView):
+			_fail("%s 第 %s 项不是 CardView：窗口 %s，状态 %s" % [
+				hand_name,
+				card_index + 1,
 				physical_size,
 				scenario_name,
 			])
-			return
-	for pair in [
-		{"a": lp_surface, "b": phase, "name": "LP 点击面与阶段球"},
-		{"a": lp_surface, "b": tools, "name": "LP 点击面与系统工具"},
-		{"a": phase, "b": player_hand, "name": "阶段球与玩家手牌"},
-		{"a": phase, "b": opponent_hand, "name": "阶段球与对手手牌"},
-		{"a": phase, "b": tools, "name": "阶段球与系统工具"},
-		{"a": player_hand, "b": tools, "name": "玩家手牌与系统工具"},
-	]:
-		if pair.a.get_global_rect().intersects(pair.b.get_global_rect()):
-			_fail(
-				"%s 发生重叠：窗口 %s，状态 %s"
-				% [pair.name, physical_size, scenario_name]
-			)
-			return
-	_assert_scenario_layout(board, logical_rect, safe_rect, physical_size, scenario_name)
+			return {"ok": false, "rect": Rect2()}
+		if !_assert_control_geometry(
+			card,
+			logical_rect,
+			safe_rect,
+			physical_size,
+			scenario_name,
+			"%s CardView %s" % [hand_name, card_index + 1]
+		):
+			return {"ok": false, "rect": Rect2()}
+		var card_rect := (card as Control).get_global_rect()
+		content_rect = card_rect if card_index == 0 else content_rect.merge(card_rect)
+	return {"ok": true, "rect": content_rect}
+
+
+func _assert_full_zone(
+	zone_value: Variant,
+	logical_rect: Rect2,
+	safe_rect: Rect2,
+	physical_size: Vector2i,
+	scenario_name: String,
+	zone_name: String
+) -> bool:
+	if !(zone_value is ZoneView):
+		_fail("%s 不是有效 ZoneView：窗口 %s，状态 %s" % [
+			zone_name,
+			physical_size,
+			scenario_name,
+		])
+		return false
+	var zone := zone_value as ZoneView
+	if !_assert_control_geometry(
+		zone,
+		logical_rect,
+		safe_rect,
+		physical_size,
+		scenario_name,
+		zone_name
+	):
+		return false
+	if !_assert_control_geometry(
+		zone.card_container,
+		logical_rect,
+		safe_rect,
+		physical_size,
+		scenario_name,
+		zone_name + " CardContainer"
+	):
+		return false
+	if zone.card_container.get_child_count() != 1:
+		_fail("%s 必须恰好显示一张卡：窗口 %s，状态 %s" % [
+			zone_name,
+			physical_size,
+			scenario_name,
+		])
+		return false
+	var card := zone.card_container.get_child(0)
+	if !(card is CardView):
+		_fail("%s 的内容不是 CardView：窗口 %s，状态 %s" % [
+			zone_name,
+			physical_size,
+			scenario_name,
+		])
+		return false
+	return _assert_control_geometry(
+		card,
+		logical_rect,
+		safe_rect,
+		physical_size,
+		scenario_name,
+		zone_name + " CardView"
+	)
 
 
 func _assert_scenario_layout(
@@ -391,27 +565,57 @@ func _assert_scenario_layout(
 	scenario_name: String
 ) -> void:
 	if scenario_name == SCENARIO_DIRECT_ATTACK:
+		if !_assert_control_geometry(
+			board.direct_attack_highlight,
+			logical_rect,
+			safe_rect,
+			physical_size,
+			scenario_name,
+			"直击 LP 高亮"
+		):
+			return
 		if (
-			!board.direct_attack_highlight.visible
-			or board.direct_attack_highlight.theme_type_variation != &"DirectAttackTarget"
+			board.direct_attack_highlight.theme_type_variation != &"DirectAttackTarget"
 			or board.direct_attack_highlight.get_global_rect()
 				!= board.opponent_status_surface.get_global_rect()
 		):
 			_fail("直击 LP 高亮未完整覆盖点击面：窗口 " + str(physical_size))
 			return
-		for zone in board.opponent_monster_zones:
+		for zone_index in range(board.opponent_monster_zones.size()):
+			var zone: ZoneView = board.opponent_monster_zones[zone_index]
 			if (
-				!zone.target_highlight.visible
-				or zone.target_highlight.theme_type_variation != &"AttackTargetPreview"
+				!_assert_control_geometry(
+					zone.target_highlight,
+					logical_rect,
+					safe_rect,
+					physical_size,
+					scenario_name,
+					"攻击预览高亮 %s" % [zone_index + 1]
+				)
 			):
+				return
+			if zone.target_highlight.theme_type_variation != &"AttackTargetPreview":
 				_fail("五个对手怪兽必须全部显示攻击预览：窗口 " + str(physical_size))
 				return
-		if board.action_box.visible or board.confirmation_overlay.visible:
+		if (
+			board.action_box.is_visible_in_tree()
+			or board.confirmation_overlay.is_visible_in_tree()
+		):
 			_fail("直击选择不得残留动作条或确认层：窗口 " + str(physical_size))
 			return
 	elif scenario_name == SCENARIO_FIVE_TARGETS:
-		_assert_five_target_highlights(board, physical_size, scenario_name)
-		if board.action_box.visible or board.confirmation_overlay.visible:
+		if !_assert_five_target_highlights(
+			board,
+			logical_rect,
+			safe_rect,
+			physical_size,
+			scenario_name
+		):
+			return
+		if (
+			board.action_box.is_visible_in_tree()
+			or board.confirmation_overlay.is_visible_in_tree()
+		):
 			_fail("不可取消目标选择不得显示动作条或确认层：窗口 " + str(physical_size))
 			return
 	elif scenario_name == SCENARIO_GENERIC_YES_NO:
@@ -420,22 +624,21 @@ func _assert_scenario_layout(
 			if child is Button:
 				button_texts.append(str(child.text))
 		if (
-			!board.confirmation_overlay.visible
+			!board.confirmation_overlay.is_visible_in_tree()
 			or board.confirmation_overlay.theme_type_variation != &"OverlayPanel"
 			or button_texts != ["是", "否"]
 		):
 			_fail("通用 YesNo 必须显示原生“是/否”确认层：窗口 " + str(physical_size))
 			return
 		if (
-			board.direct_attack_highlight.visible
-			or board.action_box.visible
+			board.direct_attack_highlight.is_visible_in_tree()
+			or board.action_box.is_visible_in_tree()
 			or _visible_target_highlight_count(board) != 0
 		):
 			_fail("通用 YesNo 不得残留攻击目标表现：窗口 " + str(physical_size))
 			return
 		_assert_optional_overlay_layout(
 			board.confirmation_overlay,
-			board,
 			logical_rect,
 			safe_rect,
 			physical_size,
@@ -443,19 +646,25 @@ func _assert_scenario_layout(
 			"确认层"
 		)
 	elif scenario_name == SCENARIO_CANCELABLE_TARGETS:
-		_assert_five_target_highlights(board, physical_size, scenario_name)
+		if !_assert_five_target_highlights(
+			board,
+			logical_rect,
+			safe_rect,
+			physical_size,
+			scenario_name
+		):
+			return
 		if (
-			!board.action_box.visible
+			!board.action_box.is_visible_in_tree()
 			or board.action_box.get_child_count() != 1
 			or !(board.action_box.get_child(0) is Button)
 			or board.action_box.get_child(0).text != "取消攻击"
-			or board.confirmation_overlay.visible
+			or board.confirmation_overlay.is_visible_in_tree()
 		):
 			_fail("可取消目标选择必须只显示“取消攻击”动作：窗口 " + str(physical_size))
 			return
 		_assert_optional_overlay_layout(
 			board.action_box,
-			board,
 			logical_rect,
 			safe_rect,
 			physical_size,
@@ -466,80 +675,78 @@ func _assert_scenario_layout(
 
 func _assert_five_target_highlights(
 	board: DuelBoard,
+	logical_rect: Rect2,
+	safe_rect: Rect2,
 	physical_size: Vector2i,
 	scenario_name: String
-) -> void:
-	if board.direct_attack_highlight.visible:
+) -> bool:
+	if board.direct_attack_highlight.is_visible_in_tree():
 		_fail("SelectCard 不得保留 LP 高亮：窗口 %s，状态 %s" % [
 			physical_size,
 			scenario_name,
 		])
-		return
-	for zone in board.opponent_monster_zones:
-		if (
-			!zone.target_highlight.visible
-			or zone.target_highlight.theme_type_variation != &"TargetHighlight"
+		return false
+	for zone_index in range(board.opponent_monster_zones.size()):
+		var zone: ZoneView = board.opponent_monster_zones[zone_index]
+		if !_assert_control_geometry(
+			zone.target_highlight,
+			logical_rect,
+			safe_rect,
+			physical_size,
+			scenario_name,
+			"合法目标高亮 %s" % [zone_index + 1]
 		):
+			return false
+		if zone.target_highlight.theme_type_variation != &"TargetHighlight":
 			_fail("五个合法目标必须全部使用 TargetHighlight：窗口 %s，状态 %s" % [
 				physical_size,
 				scenario_name,
 			])
-			return
+			return false
+	return true
 
 
 func _visible_target_highlight_count(board: DuelBoard) -> int:
 	var count := 0
 	for zone in board.opponent_monster_zones:
-		if zone.target_highlight.visible:
+		if zone.target_highlight.is_visible_in_tree():
 			count += 1
 	return count
 
 
 func _assert_optional_overlay_layout(
 	overlay: Control,
-	board: DuelBoard,
 	logical_rect: Rect2,
 	safe_rect: Rect2,
 	physical_size: Vector2i,
 	scenario_name: String,
 	control_name: String
 ) -> void:
-	var rect := overlay.get_global_rect()
-	if (
-		!overlay.is_visible_in_tree()
-		or overlay.size.x <= 0.0
-		or overlay.size.y <= 0.0
-		or !logical_rect.encloses(rect)
-		or !safe_rect.encloses(rect)
+	if !_assert_control_geometry(
+		overlay,
+		logical_rect,
+		safe_rect,
+		physical_size,
+		scenario_name,
+		control_name
 	):
-		_fail("%s 离开安全区域：窗口 %s，状态 %s，矩形 %s" % [
-			control_name,
-			physical_size,
-			scenario_name,
-			rect,
-		])
 		return
-	for other in [
-		board.player_hand,
-		board.opponent_hand,
-		board.phase_button,
-		board.find_child("SystemTools", true, false),
-	]:
-		if rect.intersects(other.get_global_rect()):
-			_fail("%s 覆盖手牌、阶段球或系统按钮：窗口 %s，状态 %s" % [
+	for child in overlay.find_children("*", "Button", true, false):
+		if !(child is Button):
+			_fail("%s 包含非按钮动态控件：窗口 %s，状态 %s" % [
 				control_name,
 				physical_size,
 				scenario_name,
 			])
 			return
-	for child in overlay.find_children("*", "Button", true, false):
 		var button := child as Button
-		if (
-			!button.is_visible_in_tree()
-			or button.disabled
-			or button.size.x <= 0.0
-			or button.size.y <= 0.0
-			or !safe_rect.encloses(button.get_global_rect())
+		if button.disabled or !_assert_control_geometry(
+			button,
+			logical_rect,
+			safe_rect,
+			physical_size,
+			scenario_name,
+			"%s 按钮“%s”" % [control_name, button.text]
 		):
 			_fail("%s 的动态按钮不可用：窗口 %s，状态 %s" % [
 				control_name,
@@ -547,6 +754,51 @@ func _assert_optional_overlay_layout(
 				scenario_name,
 			])
 			return
+
+
+func _assert_non_overlapping_layout(
+	board: DuelBoard,
+	player_hand_content_rect: Rect2,
+	opponent_hand_content_rect: Rect2,
+	physical_size: Vector2i,
+	scenario_name: String
+) -> void:
+	# HandView 本身横跨战场布局通道，其中大量空白用于 Container 居中排牌；
+	# 可点击安全关系必须锁定实际 CardView 内容包围盒，而不是把空白通道与右上角
+	# LP 面板的结构性交叠误报为遮挡。除此之外不豁免任何可见关键控件组合。
+	var items: Array[Dictionary] = [
+		{"name": "LP 点击面", "rect": board.opponent_status_surface.get_global_rect()},
+		{"name": "阶段球", "rect": board.phase_button.get_global_rect()},
+		{"name": "玩家手牌内容", "rect": player_hand_content_rect},
+		{"name": "对手手牌内容", "rect": opponent_hand_content_rect},
+		{
+			"name": "系统工具",
+			"rect": (board.find_child("SystemTools", true, false) as Control).get_global_rect(),
+		},
+	]
+	if board.action_box.is_visible_in_tree():
+		items.append({"name": "动作条", "rect": board.action_box.get_global_rect()})
+	if board.confirmation_overlay.is_visible_in_tree():
+		items.append({
+			"name": "确认层",
+			"rect": board.confirmation_overlay.get_global_rect(),
+		})
+	# 逐一生成完整无序对：LP 与双方手牌、动作条/确认层与 LP、对手手牌与系统
+	# 工具等关系都由同一矩阵覆盖，后续新增项目不会再依赖人工枚举而漏项。
+	for left_index in range(items.size()):
+		for right_index in range(left_index + 1, items.size()):
+			var left := items[left_index]
+			var right := items[right_index]
+			if (left.rect as Rect2).intersects(right.rect as Rect2):
+				_fail("%s 与 %s 发生重叠：窗口 %s，状态 %s，矩形 %s / %s" % [
+					left.name,
+					right.name,
+					physical_size,
+					scenario_name,
+					left.rect,
+					right.rect,
+				])
+				return
 
 
 func _fail(message: String) -> void:
