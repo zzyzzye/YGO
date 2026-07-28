@@ -1,6 +1,7 @@
 extends SceneTree
 
 const HAND_VIEW_SCRIPT = preload("res://src/ui/hand_view.gd")
+const DUEL_BOARD_SCRIPT = preload("res://src/duel/duel_board.gd")
 
 var _selected_events: Array = []
 
@@ -36,6 +37,30 @@ func _run() -> void:
 		return
 	if !_selected_events[1].is_empty():
 		_fail("再次点击同一卡牌必须发出空字典以取消选择")
+		return
+
+	var board = DUEL_BOARD_SCRIPT.new()
+	root.add_child(board)
+	await process_frame
+	if board.find_child("LegacyActionPanel", true, false) != null:
+		_fail("情境式布局不能保留右侧永久操作列")
+		return
+	for required_name in [
+		"Battlefield",
+		"CardDetailOverlay",
+		"ContextActionBar",
+		"PhaseButton",
+		"SystemTools",
+		"StatusToast",
+	]:
+		if board.find_child(required_name, true, false) == null:
+			_fail("情境式布局缺少节点：" + required_name)
+			return
+	if board.find_child("CardDetailOverlay", true, false).visible:
+		_fail("卡片详情浮层默认必须隐藏")
+		return
+	if board.find_child("ContextActionBar", true, false).visible:
+		_fail("情境动作条默认必须隐藏")
 		return
 
 	print("情境式决斗界面交互契约通过")
