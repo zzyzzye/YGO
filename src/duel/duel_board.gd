@@ -164,6 +164,7 @@ func render_snapshot(snapshot: Dictionary) -> void:
 	_render_zone_cards(player_spell_zones, snapshot.get("player_spells", []))
 	_render_zone_cards(opponent_monster_zones, snapshot.get("opponent_monsters", []))
 	_render_zone_cards(opponent_spell_zones, snapshot.get("opponent_spells", []))
+	_bind_hidden_opponent_monster_inputs()
 	_render_rule_decision(snapshot)
 
 
@@ -263,7 +264,7 @@ func _find_opponent_monster_zone(location: Dictionary) -> ZoneView:
 	if zone.card_container.get_child_count() == 0:
 		return null
 	var displayed_card: CardView = zone.card_container.get_child(0)
-	if _rule_location(displayed_card.card_data) != location:
+	if _opponent_monster_rule_location(displayed_card.card_data) != location:
 		return null
 	return zone
 
@@ -272,6 +273,17 @@ func _rule_location(data: Dictionary) -> Dictionary:
 	return {
 		"controller": int(data.get("controller", -1)),
 		"location": int(data.get("location", -1)),
+		"sequence": int(data.get("sequence", -1)),
+	}
+
+
+func _opponent_monster_rule_location(data: Dictionary) -> Dictionary:
+	# 对手公开场区由场景节点本身确定 controller=1/location=MZONE(4)；Bridge
+	# 为隐藏身份卡省略 controller 时，仍可安全补齐这两个非秘密语义字段。
+	# sequence 必须继续来自核心快照，不能用视觉子节点顺序推断。
+	return {
+		"controller": 1,
+		"location": 4,
 		"sequence": int(data.get("sequence", -1)),
 	}
 
@@ -298,6 +310,32 @@ func _render_zone_cards(zones: Array, cards: Array) -> void:
 			zones[sequence].show_card(card, !card.has("card_id"))
 
 
+func _bind_hidden_opponent_monster_inputs() -> void:
+	# Bridge 会隐藏对手场上卡的 card_id，CardView 因而以卡背展示并主动抑制
+	# card_selected，防止对手手牌等隐藏信息被普通浏览选中。但攻击目标只需要
+	# controller/location/sequence，必须继续消费真实按钮的 pressed 输入。
+	# 这里只为隐藏的对手怪兽补规则路由；公开卡仍走 ZoneView 既有转发，避免双发。
+	for zone in opponent_monster_zones:
+		if zone.card_container.get_child_count() != 1:
+			continue
+		var card: CardView = zone.card_container.get_child(0)
+		if card.face_down:
+			card.pressed.connect(_route_hidden_opponent_monster_press.bind(card, zone))
+
+
+func _route_hidden_opponent_monster_press(card: CardView, source_zone: ZoneView) -> void:
+	# 新快照会同步把旧 CardView 移出容器；即使外部仍持有并触发旧按钮，也不能
+	# 把上一帧位置重新送入当前规则决策。
+	if (
+		!is_instance_valid(card)
+		or card.get_parent() != source_zone.card_container
+		or source_zone.card_container.get_child_count() != 1
+		or source_zone.card_container.get_child(0) != card
+	):
+		return
+	_route_opponent_monster_selection(card.card_data, source_zone)
+
+
 func _on_card_selected(card_data: Dictionary, source_zone: ZoneView = null) -> void:
 	if card_data.is_empty():
 		_unlock_selection()
@@ -316,7 +354,7 @@ func _route_opponent_monster_selection(
 ) -> void:
 	if card_data.is_empty():
 		return
-	var location := _rule_location(card_data)
+	var location := _opponent_monster_rule_location(card_data)
 	if _rule_decision_kind == "attack_route":
 		if (
 			source_zone.target_highlight.visible

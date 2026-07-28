@@ -647,6 +647,95 @@ func _run() -> void:
 		_fail("新快照或终局状态必须立即清除全部决策表现与动态按钮")
 		return
 
+	# 真实 Bridge 会隐藏对手场上卡的 card_id，CardView 因而以卡背展示。攻击规则
+	# 仍必须允许该真实按钮发出卡位语义；不能只在测试中直接 emit ZoneView 信号，
+	# 否则运行时预览看似可点却永远到不了 Main。
+	var hidden_opponent_monster := {
+		"location": 4,
+		"sequence": 0,
+		"position": 1,
+	}
+	var hidden_negative_preview_count := _attack_target_preview_events.size()
+	var hidden_negative_target_count := _attack_target_events.size()
+	for hidden_inactive_snapshot in [
+		{
+			"decision_kind": "idle",
+			"local_player_turn": true,
+			"opponent_monsters": [hidden_opponent_monster],
+		},
+		{
+			"decision_kind": "yes_no",
+			"decision_description": 31,
+			"local_player_turn": false,
+			"opponent_monsters": [hidden_opponent_monster],
+		},
+	]:
+		board.render_snapshot(hidden_inactive_snapshot)
+		var hidden_inactive_card: CardView = (
+			board.opponent_monster_zones[0].card_container.get_child(0)
+		)
+		hidden_inactive_card.pressed.emit()
+	if (
+		_attack_target_preview_events.size() != hidden_negative_preview_count
+		or _attack_target_events.size() != hidden_negative_target_count
+	):
+		_fail("普通浏览或非本地快照点击隐藏身份怪兽不得发出规则请求")
+		return
+	board.render_snapshot({
+		"decision_kind": "yes_no",
+		"decision_description": 31,
+		"local_player_turn": true,
+		"opponent_monsters": [hidden_opponent_monster],
+	})
+	var hidden_preview_card: CardView = (
+		board.opponent_monster_zones[0].card_container.get_child(0)
+	)
+	var preview_count_before := _attack_target_preview_events.size()
+	hidden_preview_card.pressed.emit()
+	if (
+		!hidden_preview_card.face_down
+		or _attack_target_preview_events.size() != preview_count_before + 1
+		or _attack_target_preview_events.back() != {
+			"controller": 1,
+			"location": 4,
+			"sequence": 0,
+		}
+	):
+		_fail("隐藏身份的对手怪兽按钮必须能提交攻击目标预览规则位置")
+		return
+	board.render_snapshot({
+		"decision_kind": "select_card",
+		"local_player_turn": true,
+		"selection_min": 1,
+		"selection_max": 1,
+		"opponent_monsters": [hidden_opponent_monster],
+		"card_options": [{
+			"index": 44,
+			"controller": 1,
+			"location": 4,
+			"sequence": 0,
+		}],
+	})
+	var hidden_target_card: CardView = (
+		board.opponent_monster_zones[0].card_container.get_child(0)
+	)
+	var target_count_before := _attack_target_events.size()
+	hidden_preview_card.pressed.emit()
+	if (
+		_attack_target_preview_events.size() != preview_count_before + 1
+		or _attack_target_events.size() != target_count_before
+	):
+		_fail("新快照替换后，隐藏身份的旧怪兽按钮不得继续发出任何规则请求")
+		return
+	hidden_target_card.pressed.emit()
+	if (
+		!hidden_target_card.face_down
+		or _attack_target_events.size() != target_count_before + 1
+		or int(_attack_target_events.back()) != 44
+	):
+		_fail("隐藏身份的真实合法目标按钮必须提交当前 OCGCore 候选索引")
+		return
+
 	var matching_action := {
 		"card_id": 89631139,
 		"sequence": 2,
