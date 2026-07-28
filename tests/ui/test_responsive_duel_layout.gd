@@ -61,8 +61,31 @@ func _run() -> void:
 				# 不能把 headless 帧数误当成经过时间后检查尚在缩放的中间矩形。
 				var candidate_card := board.player_hand.get_child(0) as CardView
 				candidate_card.pressed.emit()
-				if candidate_card.animator.is_playing():
+				if (
+					!candidate_card.selected
+					or !candidate_card.selection_frame.visible
+					or !candidate_card.animator.is_playing()
+					or candidate_card.animator.current_animation != "select"
+				):
+					_fail("连锁候选点击必须立即启动 CardView 的 select 选中动画")
+					return
+				var completed_animation: StringName = (
 					await candidate_card.animator.animation_finished
+				)
+				var expected_pivot := Vector2(
+					candidate_card.size.x * 0.5,
+					candidate_card.size.y
+				)
+				if (
+					completed_animation != &"select"
+					or candidate_card.animator.is_playing()
+					or !candidate_card.scale.is_equal_approx(Vector2(1.06, 1.06))
+					or !candidate_card.pivot_offset.is_equal_approx(expected_pivot)
+				):
+					_fail(
+						"连锁候选动画必须完成 select，并停在 1.06 倍与底边中心缩放原点"
+					)
+					return
 			await _wait_for_stable_layout(board, str(scenario.name))
 			if _failed:
 				return
