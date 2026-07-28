@@ -28,44 +28,17 @@ void require(const bool condition, const char *message) {
 
 } // namespace
 
-namespace ygo {
+namespace ygo::test_access {
 
-// 受控夹具仅借助测试专用 friend 构造不会调用 OCGCore 的状态门禁输入。它不导出
-// Godot 方法，也不接受原始响应；真实候选提交仍由上方集成测试覆盖。
-struct YgoCoreBridgeTestAccess final {
-	static DuelSession &install_controlled_session(YgoCoreBridge &bridge) {
-		bridge.session_ = std::make_unique<DuelSession>(nullptr, nullptr);
-		return *bridge.session_;
-	}
+// 实现在独立测试翻译单元，那里在预加载 Godot/标准依赖后才局部开放私有字段。
+// 该声明仅随测试目标编译，不会进入 shipped headers 或 Godot ClassDB。
+DuelSession &install_controlled_session(YgoCoreBridge &bridge);
+void set_active(DuelSession &session);
+void set_pending_place(DuelSession &session, int player, int winner);
+const PendingAction &pending(const DuelSession &session);
+void remove_controlled_session(YgoCoreBridge &bridge);
 
-	static void set_active(DuelSession &session) {
-		session.duel_ = reinterpret_cast<void *>(static_cast<std::uintptr_t>(1));
-	}
-
-	static void set_pending_place(
-			DuelSession &session,
-			const int player,
-			const int winner) {
-		session.pending_action_.kind = PendingActionKind::SelectPlace;
-		session.pending_action_.player = player;
-		// 受控门禁用例提交 sequence=3，而快照只允许 4；若未来有人错误绕过
-		// Bridge 的玩家/终局门禁，Session 仍会在写入 OCGCore 前拒绝该值，
-		// 避免伪活动句柄被触发，同时让测试观察到错误的错误路径。
-		session.pending_action_.place_options = {{0, LOCATION_MZONE, 4}};
-		session.winner_ = winner;
-	}
-
-	static const PendingAction &pending(const DuelSession &session) {
-		return session.pending_action_;
-	}
-
-	static void remove_controlled_session(YgoCoreBridge &bridge) {
-		bridge.session_->duel_ = nullptr;
-		bridge.session_.reset();
-	}
-};
-
-} // namespace ygo
+} // namespace ygo::test_access
 
 namespace {
 
@@ -340,10 +313,9 @@ void test_bridge_place_gates_nonlocal_and_finished_controlled_session() {
 	godot::Ref<ygo::YgoCoreBridge> bridge;
 	bridge.instantiate();
 	require(bridge.is_valid(), "Bridge 受控区域门禁测试实例创建失败");
-	ygo::DuelSession &session =
-			ygo::YgoCoreBridgeTestAccess::install_controlled_session(*bridge.operator->());
-	ygo::YgoCoreBridgeTestAccess::set_active(session);
-	ygo::YgoCoreBridgeTestAccess::set_pending_place(session, 1, -1);
+	ygo::DuelSession &session = ygo::test_access::install_controlled_session(*bridge.operator->());
+	ygo::test_access::set_active(session);
+	ygo::test_access::set_pending_place(session, 1, -1);
 
 	const godot::Dictionary nonlocal = bridge->submit_place(0, LOCATION_MZONE, 3);
 	require(!static_cast<bool>(nonlocal["ok"]), "非本地待决玩家不得提交区域");
@@ -352,13 +324,13 @@ void test_bridge_place_gates_nonlocal_and_finished_controlled_session() {
 					== godot::String::utf8("当前不是本地玩家的操作回合"),
 			"非本地待决玩家必须返回中文门禁错误");
 	require(
-			ygo::YgoCoreBridgeTestAccess::pending(session).kind
+			ygo::test_access::pending(session).kind
 					== ygo::PendingActionKind::SelectPlace
-					&& ygo::YgoCoreBridgeTestAccess::pending(session).player == 1
-					&& ygo::YgoCoreBridgeTestAccess::pending(session).place_options.size() == 1,
+					&& ygo::test_access::pending(session).player == 1
+					&& ygo::test_access::pending(session).place_options.size() == 1,
 			"非本地门禁拒绝后 pending 不得推进或丢失候选");
 
-	ygo::YgoCoreBridgeTestAccess::set_pending_place(session, 0, 0);
+	ygo::test_access::set_pending_place(session, 0, 0);
 	const godot::Dictionary finished = bridge->submit_place(0, LOCATION_MZONE, 3);
 	require(!static_cast<bool>(finished["ok"]), "终局决斗不得提交区域");
 	require(
@@ -366,12 +338,12 @@ void test_bridge_place_gates_nonlocal_and_finished_controlled_session() {
 					== godot::String::utf8("决斗已经结束，不能继续提交动作"),
 			"终局提交必须返回中文门禁错误");
 	require(
-			ygo::YgoCoreBridgeTestAccess::pending(session).kind
+			ygo::test_access::pending(session).kind
 					== ygo::PendingActionKind::SelectPlace
-					&& ygo::YgoCoreBridgeTestAccess::pending(session).player == 0
-					&& ygo::YgoCoreBridgeTestAccess::pending(session).place_options.size() == 1,
+					&& ygo::test_access::pending(session).player == 0
+					&& ygo::test_access::pending(session).place_options.size() == 1,
 			"终局门禁拒绝后 pending 不得推进或丢失候选");
-	ygo::YgoCoreBridgeTestAccess::remove_controlled_session(*bridge.operator->());
+	ygo::test_access::remove_controlled_session(*bridge.operator->());
 }
 
 void test_chain_dictionary_contract_hides_opponent_facedown_identity() {
@@ -456,6 +428,13 @@ void test_bridge_rejects_negative_selection_before_narrowing() {
 	require(
 			!bridge->has_method(godot::StringName("send_duel_response")),
 			"send_duel_response 不得绑定到 Godot ClassDB");
+	const godot::Dictionary inactive_place =
+			bridge->submit_place(0, LOCATION_MZONE, 3);
+	require(!static_cast<bool>(inactive_place["ok"]), "无活动会话不得提交合法区域三元组");
+	require(
+			static_cast<godot::String>(inactive_place["message"])
+					== godot::String::utf8("决斗尚未创建"),
+			"无活动会话的合法区域三元组必须返回中文会话错误");
 
 	const godot::Dictionary rejected = bridge->submit_card_selection(-1);
 	require(!static_cast<bool>(rejected["ok"]), "负索引必须被拒绝");

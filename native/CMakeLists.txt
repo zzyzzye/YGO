@@ -183,6 +183,7 @@ file(MAKE_DIRECTORY "${PENDING_ACTION_ADAPTER_TEST_PROJECT}/.godot")
 add_library(test_pending_action_godot_adapter SHARED
 	src/pending_action_godot_adapter.cpp
 	src/ygo_core_bridge.cpp
+	tests/test_bridge_private_access.cpp
 	tests/test_pending_action_godot_adapter.cpp
 )
 target_include_directories(test_pending_action_godot_adapter PRIVATE include)

@@ -13,10 +13,6 @@
 
 namespace ygo {
 
-// 仅用于原生 Bridge 契约测试构造不会进入 OCGCore 的门禁状态。该 friend 不新增
-// 任何正式 API，也不能绕过 DuelSession 对实际规则响应的语义校验。
-struct YgoCoreBridgeTestAccess;
-
 struct CreateResult {
 	bool ok = false;
 	int status = -1;
@@ -137,7 +133,6 @@ public:
 	[[nodiscard]] bool is_active() const noexcept;
 
 private:
-	friend struct YgoCoreBridgeTestAccess;
 	std::shared_ptr<const CardDatabase> database_;
 	std::shared_ptr<OfficialScriptLoader> scripts_;
 	OcgCardDataAdapter card_data_adapter_;
