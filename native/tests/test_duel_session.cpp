@@ -153,6 +153,161 @@ void test_automatic_chain_strategy_selects_local_stop_pass_or_first_option() {
 	assert(forced.option_index == 17);
 }
 
+void test_fixed_real_decks_offer_local_chain_and_continue_after_response() {
+	const std::filesystem::path root = repository_root();
+	const auto loaded = ygo::CardDatabase::load_json_intersection(
+			root / "data/cards.json",
+			root / "images");
+	assert(loaded.ok);
+	const std::filesystem::path scripts_root = root / "third_party/CardScripts";
+	auto scripts = std::make_shared<ygo::OfficialScriptLoader>(scripts_root);
+
+	constexpr std::uint32_t ash_blossom = 14558127;
+	constexpr std::uint32_t pot_of_greed = 55144522;
+	constexpr std::uint64_t fixture_seed = 0x434841494eULL;
+	assert(loaded.database->find(ash_blossom) != nullptr);
+	assert(loaded.database->find(pot_of_greed) != nullptr);
+	assert(std::filesystem::is_regular_file(
+			scripts_root / "official" / "c14558127.lua"));
+	assert(std::filesystem::is_regular_file(
+			scripts_root / "official" / "c55144522.lua"));
+
+	// 两边都使用单一卡号填满主卡组，因此 OCGCore 洗牌不会改变关键手牌。
+	// 后手发动“强欲之壶”时，先手手中的“灰流丽”必定成为本地可选连锁候选；
+	// 这条路径完全由真实脚本和 Processor 产生，不向 Session 注入 PendingAction。
+	auto reach_real_chain = [&]() {
+		auto session = std::make_unique<ygo::DuelSession>(
+				loaded.database,
+				scripts);
+		assert(session->create(fixture_seed).ok);
+		assert(session->add_deck_cards(
+				0,
+				std::vector<std::uint32_t>(40, ash_blossom),
+				LOCATION_DECK).added == 40);
+		assert(session->add_deck_cards(
+				1,
+				std::vector<std::uint32_t>(40, pot_of_greed),
+				LOCATION_DECK).added == 40);
+
+		auto advance_empty = [&session](ygo::ProcessResult result) {
+			for (int step_index = 0;
+					step_index < 100
+					&& result.pending_action.kind
+							== ygo::PendingActionKind::None
+					&& result.status != OCG_DUEL_STATUS_END;
+					++step_index) {
+				result = session->step();
+			}
+			return result;
+		};
+
+		ygo::ProcessResult process = advance_empty(session->start());
+		assert(process.pending_action.kind == ygo::PendingActionKind::Idle);
+		assert(process.pending_action.player == 0);
+		process = advance_empty(session->submit_end_turn());
+		assert(process.pending_action.kind == ygo::PendingActionKind::Idle);
+		assert(process.pending_action.player == 1);
+
+		const auto set_pot = std::find_if(
+				process.pending_action.idle_actions.begin(),
+				process.pending_action.idle_actions.end(),
+				[](const ygo::IdleAction &action) {
+					return action.kind == ygo::IdleActionKind::SpellTrapSet
+							&& action.card_id == pot_of_greed
+							&& action.location == LOCATION_HAND;
+				});
+		assert(set_pot != process.pending_action.idle_actions.end());
+		process = advance_empty(session->submit_idle_action(
+				set_pot->kind,
+				set_pot->index));
+		assert(process.pending_action.kind == ygo::PendingActionKind::Idle);
+		assert(process.pending_action.player == 1);
+		assert(session->query_count(1, LOCATION_SZONE) == 1);
+
+		const auto activate_pot = std::find_if(
+				process.pending_action.idle_actions.begin(),
+				process.pending_action.idle_actions.end(),
+				[](const ygo::IdleAction &action) {
+					return action.kind == ygo::IdleActionKind::Activate
+							&& action.card_id == pot_of_greed
+							&& action.location == LOCATION_SZONE;
+				});
+		assert(activate_pot != process.pending_action.idle_actions.end());
+		process = advance_empty(session->submit_idle_action(
+				activate_pot->kind,
+				activate_pot->index));
+		assert(process.pending_action.kind
+				== ygo::PendingActionKind::SelectChain);
+		assert(process.pending_action.player == 0);
+		assert(!process.pending_action.chain_forced);
+		assert(!process.pending_action.chain_options.empty());
+		assert(std::all_of(
+				process.pending_action.chain_options.begin(),
+				process.pending_action.chain_options.end(),
+				[](const ygo::ChainOption &option) {
+					return option.card_id == ash_blossom
+							&& option.controller == 0
+							&& option.location == LOCATION_HAND;
+				}));
+		return std::pair{
+			std::move(session),
+			std::move(process),
+		};
+	};
+
+	{
+		auto [session, chain] = reach_real_chain();
+		const std::size_t ash_hand_before =
+				session->query_count(0, LOCATION_HAND);
+		const std::size_t opponent_hand_before =
+				session->query_count(1, LOCATION_HAND);
+		ygo::ProcessResult process = session->submit_chain(
+				chain.pending_action.chain_options.front().index);
+		for (int step_index = 0;
+				step_index < 100
+				&& process.pending_action.kind == ygo::PendingActionKind::None
+				&& process.status != OCG_DUEL_STATUS_END;
+				++step_index) {
+			process = session->step();
+		}
+		assert(process.ok);
+		assert(!process.response_rejected);
+		assert(process.pending_action.kind == ygo::PendingActionKind::Idle);
+		assert(process.pending_action.player == 1);
+		// 灰流丽已作为真实连锁代价进入墓地，强欲之壶被无效，后手没有抽两张。
+		// opponent_hand_before 在盖放并发动之后采样，壶已经不在手牌，所以应保持不变。
+		assert(session->query_count(0, LOCATION_HAND) == ash_hand_before - 1);
+		assert(session->query_count(0, LOCATION_GRAVE) == 1);
+		assert(session->query_count(1, LOCATION_HAND) == opponent_hand_before);
+		assert(session->query_count(1, LOCATION_GRAVE) == 1);
+	}
+
+	{
+		auto [session, chain] = reach_real_chain();
+		const std::size_t ash_hand_before =
+				session->query_count(0, LOCATION_HAND);
+		const std::size_t opponent_hand_before =
+				session->query_count(1, LOCATION_HAND);
+		ygo::ProcessResult process = session->pass_chain();
+		for (int step_index = 0;
+				step_index < 100
+				&& process.pending_action.kind == ygo::PendingActionKind::None
+				&& process.status != OCG_DUEL_STATUS_END;
+				++step_index) {
+			process = session->step();
+		}
+		assert(process.ok);
+		assert(!process.response_rejected);
+		assert(process.pending_action.kind == ygo::PendingActionKind::Idle);
+		assert(process.pending_action.player == 1);
+		// 跳过后灰流丽仍在手牌，强欲之壶进入墓地并实际抽两张，证明核心继续结算。
+		assert(session->query_count(0, LOCATION_HAND) == ash_hand_before);
+		assert(session->query_count(0, LOCATION_GRAVE) == 0);
+		assert(session->query_count(1, LOCATION_HAND) == opponent_hand_before + 2);
+		assert(session->query_count(1, LOCATION_GRAVE) == 1);
+	}
+}
+
 void test_chain_submission_validates_snapshot_and_recovers_after_retry() {
 	const std::filesystem::path root = repository_root();
 	const auto loaded = ygo::CardDatabase::load_json_intersection(
@@ -867,6 +1022,7 @@ int main() {
 	test_inactive_session_rejects_end_turn();
 	test_raw_compatibility_response_advances_pending_decision();
 	test_automatic_chain_strategy_selects_local_stop_pass_or_first_option();
+	test_fixed_real_decks_offer_local_chain_and_continue_after_response();
 	test_chain_submission_validates_snapshot_and_recovers_after_retry();
 	test_real_direct_attack_is_accepted();
 	test_fixed_real_decks_advance_to_second_players_idle_action();

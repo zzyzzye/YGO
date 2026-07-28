@@ -21,6 +21,7 @@ const SCENARIO_FIVE_TARGETS := "五个合法怪兽目标"
 const SCENARIO_GENERIC_YES_NO := "通用 YesNo 确认"
 const SCENARIO_CANCELABLE_TARGETS := "可取消目标选择"
 const SCENARIO_SELECT_POSITION := "四种表示形式"
+const SCENARIO_SELECT_CHAIN := "手牌连锁多效果"
 
 var _failed := false
 
@@ -49,11 +50,20 @@ func _run() -> void:
 		_assert_stretch_contract(physical_size)
 		if _failed:
 			return
-		# 同一场景依次消费四份规则快照，既覆盖每种满载布局，也验证新快照能清除
+		# 同一场景依次消费六份规则快照，既覆盖每种满载布局，也验证新快照能清除
 		# 上一状态的高亮和浮层。物理窗口只在外层切换，保持真实 Stretch 路径。
 		for scenario in _responsive_scenarios():
 			board.render_snapshot(scenario.snapshot)
-			await _wait_for_stable_layout(board)
+			if str(scenario.name) == SCENARIO_SELECT_CHAIN:
+				# 连锁效果按钮只有点击真实候选 CardView 后才出现；在布局稳定前
+				# 走生产 pressed 信号，避免只验证初始“不连锁”按钮而漏掉最宽状态。
+				# 选中反馈是 0.1 秒 AnimationPlayer 动画；必须等待真实动画完成，
+				# 不能把 headless 帧数误当成经过时间后检查尚在缩放的中间矩形。
+				var candidate_card := board.player_hand.get_child(0) as CardView
+				candidate_card.pressed.emit()
+				if candidate_card.animator.is_playing():
+					await candidate_card.animator.animation_finished
+			await _wait_for_stable_layout(board, str(scenario.name))
 			if _failed:
 				return
 			_assert_populated_layout(board, physical_size, str(scenario.name))
@@ -117,12 +127,39 @@ func _responsive_scenarios() -> Array[Dictionary]:
 	select_position["selection_card_id"] = 89631139
 	select_position["position_options"] = [1, 2, 4, 8]
 
+	var select_chain := _maximum_snapshot()
+	select_chain["decision_kind"] = "select_chain"
+	select_chain["chain_forced"] = false
+	select_chain["chain_options"] = [
+		{
+			"index": 17,
+			"card_id": 50000,
+			"controller": 0,
+			"location": 2,
+			"sequence": 0,
+			"position": 1,
+			"description": 145581271,
+			"client_mode": 0,
+		},
+		{
+			"index": 42,
+			"card_id": 50000,
+			"controller": 0,
+			"location": 2,
+			"sequence": 0,
+			"position": 1,
+			"description": 145581272,
+			"client_mode": 1,
+		},
+	]
+
 	return [
 		{"name": SCENARIO_DIRECT_ATTACK, "snapshot": direct_attack},
 		{"name": SCENARIO_FIVE_TARGETS, "snapshot": five_targets},
 		{"name": SCENARIO_GENERIC_YES_NO, "snapshot": generic_yes_no},
 		{"name": SCENARIO_CANCELABLE_TARGETS, "snapshot": cancelable_targets},
 		{"name": SCENARIO_SELECT_POSITION, "snapshot": select_position},
+		{"name": SCENARIO_SELECT_CHAIN, "snapshot": select_chain},
 	]
 
 
@@ -201,7 +238,7 @@ func _five_opponent_monster_options() -> Array[Dictionary]:
 	return options
 
 
-func _wait_for_stable_layout(board: Control) -> void:
+func _wait_for_stable_layout(board: Control, scenario_name: String) -> void:
 	# Container、Theme 和动态按钮都会延迟重排。连续两个采样间隔均完全一致后
 	# 才断言，避免把尚在变化的中间矩形误判为稳定布局。
 	var previous_rects: Array[Rect2] = []
@@ -216,7 +253,10 @@ func _wait_for_stable_layout(board: Control) -> void:
 		else:
 			stable_intervals = 0
 		previous_rects = current_rects
-	_fail("决斗布局在限定帧数内未连续稳定：" + str(root.size))
+	_fail(
+		"决斗布局在限定帧数内未连续稳定：窗口 %s，状态 %s"
+		% [root.size, scenario_name]
+	)
 
 
 func _collect_visible_control_rects(board: Control) -> Array[Rect2]:
@@ -773,6 +813,45 @@ func _assert_scenario_layout(
 			physical_size,
 			scenario_name,
 			"表示形式确认层"
+		)
+	elif scenario_name == SCENARIO_SELECT_CHAIN:
+		var chain_button_texts: Array[String] = []
+		for child in board.action_box.get_children():
+			if child is Button:
+				chain_button_texts.append(str(child.text))
+		var candidate_card := board.player_hand.get_child(0) as CardView
+		var non_candidate_card := board.player_hand.get_child(1) as CardView
+		if (
+			!board.action_box.is_visible_in_tree()
+			or chain_button_texts != [
+				"发动效果 1（描述 145581271）",
+				"发动效果 2（描述 145581272）",
+				"不连锁",
+			]
+			or board.confirmation_overlay.is_visible_in_tree()
+			or !candidate_card.self_modulate.is_equal_approx(
+				candidate_card.get_theme_color(
+					&"candidate_modulate",
+					&"ChainCandidateHand"
+				)
+			)
+			or !non_candidate_card.self_modulate.is_equal_approx(
+				non_candidate_card.get_theme_color(
+					&"non_candidate_modulate",
+					&"ChainCandidateHand"
+				)
+			)
+		):
+			_fail("连锁候选必须显示两项真实效果按钮、不连锁入口和独立手牌高亮：窗口 "
+				+ str(physical_size))
+			return
+		_assert_optional_overlay_layout(
+			board.action_box,
+			logical_rect,
+			safe_rect,
+			physical_size,
+			scenario_name,
+			"连锁动作条"
 		)
 
 

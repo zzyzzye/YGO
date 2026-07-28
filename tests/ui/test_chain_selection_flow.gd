@@ -491,14 +491,16 @@ func _test_failure_retry_and_stale_generation() -> bool:
 	var current_generation: int = board._rule_decision_generation
 	fake.continue_with_same_shape = true
 	fake.reentrant_request = func() -> void:
-		board.chain_requested.emit(7, current_generation)
+		# 模拟用户在同步 Bridge 调用尚未返回时再次点击同一个真实动态按钮。
+		# 第二次 pressed 会完整经过 DuelBoard 信号转发，必须被 Main 提交锁拦截。
+		current_button.pressed.emit()
 	current_button.pressed.emit()
 	if !_check(
 		fake.method_calls("submit_chain").size() == 3
 			and str(fake.pending.kind) == "select_chain"
 			and int(fake.pending.chain_options[0].index) == 70
 			and board._rule_decision_generation == current_generation + 1,
-		"同步重入只能提交一次，成功后的下一份同形决策必须使用新代次"
+		"重复点击同一真实效果按钮只能提交一次，下一份同形决策必须使用新代次"
 	):
 		return false
 

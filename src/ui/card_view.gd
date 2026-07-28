@@ -25,6 +25,15 @@ func _ready() -> void:
 	pressed.connect(_on_pressed)
 	mouse_entered.connect(_on_mouse_entered)
 	mouse_exited.connect(_on_mouse_exited)
+	resized.connect(_update_scale_pivot)
+	_update_scale_pivot()
+
+
+func _update_scale_pivot() -> void:
+	# 手牌底边会贴齐 SafeArea。以默认左上角缩放会把选中反馈扩到安全区外；
+	# 随 Container 最终分配尺寸更新为底边中心后，动画只向上和两侧展开，
+	# 同时兼容场区覆盖后的紧凑 CardView 尺寸。
+	pivot_offset = Vector2(size.x * 0.5, size.y)
 
 
 func configure(data: Dictionary, show_back := false) -> void:
