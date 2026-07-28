@@ -504,6 +504,17 @@ ygo::PendingAction parse_chain_message(
 				"当前没有可发动连锁，将自动跳过响应窗口",
 		};
 	}
+	if (forced != 0 && chain_count == 0) {
+		// 强制连锁不接受 -1 跳过，而空候选又无法提交任何非负索引。该组合
+		// 没有合法的 OCGCore 响应，必须在协议边界拒绝，不能发布死锁快照。
+		return {
+				ygo::PendingActionKind::Malformed,
+				-1,
+				false,
+				MSG_SELECT_CHAIN,
+				"强制连锁消息缺少可发动候选",
+		};
+	}
 
 	ygo::PendingAction pending{
 			ygo::PendingActionKind::SelectChain,

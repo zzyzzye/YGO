@@ -120,8 +120,9 @@ DuelResponse build_chain_response(
 	if (candidate == pending_action.chain_options.end()) {
 		return {false, "连锁候选不属于当前 OCGCore 候选列表", {}};
 	}
-	if (option_index > std::numeric_limits<std::uint32_t>::max()) {
-		return {false, "连锁候选索引超出 OCGCore 协议范围", {}};
+	if (option_index
+			> static_cast<std::size_t>(std::numeric_limits<std::int32_t>::max())) {
+		return {false, "连锁候选索引超出 OCGCore 有符号协议范围", {}};
 	}
 	// SelectChain 直接读取已选候选的 int32 下标。只允许从快照候选表取值，
 	// 以免 Godot 按卡片或效果描述重新匹配后提交一个已失效的索引。

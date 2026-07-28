@@ -498,6 +498,21 @@ void test_chain_rejects_invalid_player_and_forced_flag() {
 			== ygo::PendingActionKind::Malformed);
 }
 
+void test_forced_chain_without_candidates_is_malformed() {
+	std::vector<std::uint8_t> chain{MSG_SELECT_CHAIN, 0, 0, 1};
+	append_little_endian<std::uint32_t>(chain, 0);
+	append_little_endian<std::uint32_t>(chain, 0);
+	append_little_endian<std::uint32_t>(chain, 0);
+
+	const std::vector<std::uint8_t> stream = framed(chain);
+	const ygo::PendingAction pending =
+			ygo::parse_pending_action(stream.data(), stream.size());
+	// 强制窗口既不能跳过也没有可发动效果时不存在合法响应；必须在解析边界
+	// 拒绝该矛盾帧，不能把不可恢复状态发布给会话或界面。
+	assert(pending.kind == ygo::PendingActionKind::Malformed);
+	assert(pending.chain_options.empty());
+}
+
 void test_all_idle_list_widths_are_consumed_before_flags() {
 	std::vector<std::uint8_t> stream;
 	std::vector<std::uint8_t> idle{MSG_SELECT_IDLECMD, 1};
@@ -684,6 +699,7 @@ int main() {
 	test_chain_rejects_truncated_candidate_without_publishing_options();
 	test_chain_rejects_trailing_bytes_after_candidates();
 	test_chain_rejects_invalid_player_and_forced_flag();
+	test_forced_chain_without_candidates_is_malformed();
 	test_all_idle_list_widths_are_consumed_before_flags();
 	test_invalid_player_is_rejected_for_supported_messages();
 	test_all_known_unimplemented_interactions_preserve_message_type();

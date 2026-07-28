@@ -213,6 +213,35 @@ void test_chain_response_rejects_unknown_candidate_index() {
 	assert(response.bytes.empty());
 }
 
+void test_chain_response_accepts_the_largest_non_negative_int32_index() {
+	const std::size_t largest_index = static_cast<std::size_t>(
+			std::numeric_limits<std::int32_t>::max());
+	ygo::PendingAction pending;
+	pending.kind = ygo::PendingActionKind::SelectChain;
+	pending.chain_options = {ygo::ChainOption{largest_index}};
+
+	const ygo::DuelResponse response =
+			ygo::build_chain_response(pending, largest_index);
+	assert(response.ok);
+	assert(response.bytes == std::vector<std::uint8_t>({
+			0xff, 0xff, 0xff, 0x7f,
+	}));
+}
+
+void test_chain_response_rejects_index_beyond_non_negative_int32_range() {
+	const std::size_t oversized_index = static_cast<std::size_t>(
+			std::numeric_limits<std::int32_t>::max()) + 1U;
+	ygo::PendingAction pending;
+	pending.kind = ygo::PendingActionKind::SelectChain;
+	pending.chain_options = {ygo::ChainOption{oversized_index}};
+
+	const ygo::DuelResponse response =
+			ygo::build_chain_response(pending, oversized_index);
+	assert(!response.ok);
+	assert(response.message == "连锁候选索引超出 OCGCore 有符号协议范围");
+	assert(response.bytes.empty());
+}
+
 void test_chain_pass_is_allowed_only_for_non_forced_chain() {
 	ygo::PendingAction pending;
 	pending.kind = ygo::PendingActionKind::SelectChain;
@@ -251,6 +280,8 @@ int main() {
 	test_card_selection_cancel_encodes_negative_one_as_little_endian_int32();
 	test_chain_response_encodes_current_candidate_index();
 	test_chain_response_rejects_unknown_candidate_index();
+	test_chain_response_accepts_the_largest_non_negative_int32_index();
+	test_chain_response_rejects_index_beyond_non_negative_int32_range();
 	test_chain_pass_is_allowed_only_for_non_forced_chain();
 	test_chain_pass_rejects_forced_chain();
 }

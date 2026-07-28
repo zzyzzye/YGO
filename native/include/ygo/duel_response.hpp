@@ -17,7 +17,7 @@ struct DuelResponse {
 	std::vector<std::uint8_t> bytes;
 };
 
-// 根据已经解析并验证的待决策快照构造 OCGCore 响应。三个函数都不持有
+// 根据已经解析并验证的待决策快照构造 OCGCore 响应。所有构造器都不持有
 // PendingAction，也不调用规则引擎，因此可独立验证协议字节与语义门禁。
 [[nodiscard]] DuelResponse build_yes_no_response(
 		const PendingAction &pending_action,
