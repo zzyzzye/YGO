@@ -313,7 +313,17 @@ void DuelSession::set_response(const void *response_data, std::size_t response_s
 	if (!is_active()) {
 		return;
 	}
-	OCG_DuelSetResponse(static_cast<OCG_Duel>(duel_), response_data, static_cast<std::uint32_t>(response_size));
+	// legacy 原始响应入口仍必须遵守会话状态机：响应对应当前 pending 快照，
+	// 写入 OCGCore 后将该快照保存为重试上下文并清空当前决策，step() 才能
+	// 消费响应。否则引擎已收到字节而会话仍认为用户尚未作答，兼容入口永远
+	// 无法推进。原始入口不授权后续区域自动选择，避免跨过另一个玩家决策。
+	last_submitted_action_ = pending_action_;
+	pending_action_ = {};
+	allow_auto_select_place_ = false;
+	OCG_DuelSetResponse(
+			static_cast<OCG_Duel>(duel_),
+			response_data,
+			static_cast<std::uint32_t>(response_size));
 }
 
 ProcessResult DuelSession::submit_end_turn() {

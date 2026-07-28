@@ -88,6 +88,42 @@ std::filesystem::path repository_root() {
 	return std::filesystem::path(__FILE__).parent_path().parent_path().parent_path();
 }
 
+void test_raw_compatibility_response_advances_pending_decision() {
+	const std::filesystem::path root = repository_root();
+	const auto loaded = ygo::CardDatabase::load_json_intersection(
+			root / "data/cards.json",
+			root / "images");
+	assert(loaded.ok);
+	auto scripts = std::make_shared<ygo::OfficialScriptLoader>(
+			root / "third_party/CardScripts");
+	const std::vector<std::uint32_t> deck(40, 89631139);
+
+	ygo::DuelSession session(loaded.database, scripts);
+	assert(session.create(0x524157ULL).ok);
+	assert(session.add_deck_cards(0, deck, LOCATION_DECK).added == 40);
+	assert(session.add_deck_cards(1, deck, LOCATION_DECK).added == 40);
+	ygo::ProcessResult process = session.start();
+	while (process.pending_action.kind == ygo::PendingActionKind::None) {
+		process = session.step();
+	}
+	assert(process.pending_action.kind == ygo::PendingActionKind::Idle);
+	assert(process.pending_action.player == 0);
+
+	// legacy 入口接收完整 OCGCore 响应；写入响应后必须消费原决策快照，
+	// 否则 step() 会把仍在 pending 的旧快照误判为重复推进并拒绝处理。
+	const std::array<std::uint8_t, 4> end_turn_response{7, 0, 0, 0};
+	session.set_response(end_turn_response.data(), end_turn_response.size());
+	process = session.step();
+	while (process.ok
+			&& process.pending_action.kind == ygo::PendingActionKind::None
+			&& process.status != OCG_DUEL_STATUS_END) {
+		process = session.step();
+	}
+	assert(process.ok);
+	assert(process.pending_action.kind == ygo::PendingActionKind::Idle);
+	assert(process.pending_action.player == 1);
+}
+
 void test_real_direct_attack_is_accepted() {
 	const std::filesystem::path root = repository_root();
 	const auto loaded = ygo::CardDatabase::load_json_intersection(
@@ -453,6 +489,7 @@ int main() {
 	assert(minor >= 0);
 	test_real_callbacks_create_and_destroy_duel();
 	test_inactive_session_rejects_end_turn();
+	test_raw_compatibility_response_advances_pending_decision();
 	test_real_direct_attack_is_accepted();
 	test_fixed_real_decks_advance_to_second_players_idle_action();
 	test_full_local_assets_when_requested();
