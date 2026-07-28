@@ -472,6 +472,29 @@ ygo::PendingAction parse_chain_message(
 				"连锁选择消息包含非法玩家编号",
 		};
 	}
+	if (forced > 1) {
+		return {
+				ygo::PendingActionKind::Malformed,
+				-1,
+				false,
+				MSG_SELECT_CHAIN,
+				"连锁选择消息包含非法强制标记",
+		};
+	}
+	// 每个候选严格对应 OCGCore 写入的 23 字节：code(4)、loc_info(10)、
+	// description(8)、client_mode(1)。先按剩余长度验证，既拒绝截断/尾随，
+	// 也避免由不可信 chain_count 触发过量分配。
+	constexpr std::size_t chain_option_size = 23;
+	if (chain_count > reader.remaining() / chain_option_size
+			|| reader.remaining() != chain_count * chain_option_size) {
+		return {
+				ygo::PendingActionKind::Malformed,
+				-1,
+				false,
+				MSG_SELECT_CHAIN,
+				"连锁选择候选长度与协议不一致",
+		};
+	}
 	if (forced == 0 && chain_count == 0) {
 		return {
 				ygo::PendingActionKind::AutoPassChain,
@@ -481,13 +504,38 @@ ygo::PendingAction parse_chain_message(
 				"当前没有可发动连锁，将自动跳过响应窗口",
 		};
 	}
-	return {
-			ygo::PendingActionKind::Unsupported,
+
+	ygo::PendingAction pending{
+			ygo::PendingActionKind::SelectChain,
 			static_cast<int>(player),
 			false,
 			MSG_SELECT_CHAIN,
-			"当前连锁选择包含候选效果，尚未实现",
+			"等待玩家选择发动连锁效果",
 	};
+	pending.chain_forced = forced != 0;
+	pending.chain_options.reserve(chain_count);
+	for (std::uint32_t index = 0; index < chain_count; ++index) {
+		ygo::ChainOption option;
+		option.index = index;
+		if (!reader.read_u32(option.card_id)
+				|| !reader.read_u8(option.controller)
+				|| !reader.read_u8(option.location)
+				|| !reader.read_u32(option.sequence)
+				|| !reader.read_u32(option.position)
+				|| !reader.read_u64(option.description)
+				|| !reader.read_u8(option.client_mode)
+				|| option.controller > 1) {
+			return {
+					ygo::PendingActionKind::Malformed,
+					-1,
+					false,
+					MSG_SELECT_CHAIN,
+					"连锁选择候选包含截断或非法卡位信息",
+			};
+		}
+		pending.chain_options.push_back(option);
+	}
+	return pending;
 }
 
 ygo::PendingAction parse_select_place_message(

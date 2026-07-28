@@ -30,5 +30,12 @@ struct DuelResponse {
 [[nodiscard]] DuelResponse build_position_response(
 		const PendingAction &pending_action,
 		std::uint32_t position);
+// SelectChain 通过 int32 小端候选索引发动效果；跳过则使用 int32(-1)，但仅
+// 非强制窗口可以构造该响应。两个函数只消费已验证的 PendingAction 快照。
+[[nodiscard]] DuelResponse build_chain_response(
+		const PendingAction &pending_action,
+		std::size_t option_index);
+[[nodiscard]] DuelResponse build_chain_pass_response(
+		const PendingAction &pending_action);
 
 } // namespace ygo

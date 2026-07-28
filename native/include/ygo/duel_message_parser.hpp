@@ -14,6 +14,7 @@ enum class PendingActionKind {
 	YesNo,
 	SelectCard,
 	SelectPosition,
+	SelectChain,
 	AutoPassChain,
 	AutoSelectPlace,
 	Retry,
@@ -63,6 +64,20 @@ struct CardSelectionOption {
 	std::uint8_t location = 0;
 	std::uint32_t sequence = 0;
 	std::uint32_t position = 0;
+};
+
+// 对应 MSG_SELECT_CHAIN 的一个可发动效果。index 保持 OCGCore 在当前响应
+// 窗口给出的候选顺序：同一张卡可以因不同效果出现多次，响应层不得按卡片
+// 编号去重，必须仅提交经解析确认的 index。
+struct ChainOption {
+	std::size_t index = 0;
+	std::uint32_t card_id = 0;
+	std::uint8_t controller = 0;
+	std::uint8_t location = 0;
+	std::uint32_t sequence = 0;
+	std::uint32_t position = 0;
+	std::uint64_t description = 0;
+	std::uint8_t client_mode = 0;
 };
 
 // 对应 MSG_SELECT_BATTLECMD 中的可发动效果或可攻击怪兽。攻击动作的
@@ -120,6 +135,10 @@ struct PendingAction {
 	std::uint32_t min_select = 0;
 	std::uint32_t max_select = 0;
 	std::vector<CardSelectionOption> card_options;
+	// MSG_SELECT_CHAIN 的 forced 字段只接受 0/1。为 true 时协议禁止提交
+	// int32(-1) 跳过；chain_options 中每项都对应核心原始候选索引。
+	bool chain_forced = false;
+	std::vector<ChainOption> chain_options;
 	// MSG_SELECT_POSITION 的 card_id 用于说明正在选择表示形式的规则卡牌；
 	// position_options 已将核心位掩码拆成合法单值，Godot 不得自行解释掩码。
 	std::uint32_t selection_card_id = 0;

@@ -188,6 +188,54 @@ void test_card_selection_cancel_encodes_negative_one_as_little_endian_int32() {
 	}));
 }
 
+void test_chain_response_encodes_current_candidate_index() {
+	ygo::PendingAction pending;
+	pending.kind = ygo::PendingActionKind::SelectChain;
+	pending.chain_options = {
+			ygo::ChainOption{0},
+			ygo::ChainOption{0x01020304U},
+	};
+
+	const ygo::DuelResponse response =
+			ygo::build_chain_response(pending, 0x01020304U);
+	assert(response.ok);
+	assert(response.bytes == std::vector<std::uint8_t>({4, 3, 2, 1}));
+}
+
+void test_chain_response_rejects_unknown_candidate_index() {
+	ygo::PendingAction pending;
+	pending.kind = ygo::PendingActionKind::SelectChain;
+	pending.chain_options = {ygo::ChainOption{0}};
+
+	const ygo::DuelResponse response = ygo::build_chain_response(pending, 1);
+	assert(!response.ok);
+	assert(response.message == "连锁候选不属于当前 OCGCore 候选列表");
+	assert(response.bytes.empty());
+}
+
+void test_chain_pass_is_allowed_only_for_non_forced_chain() {
+	ygo::PendingAction pending;
+	pending.kind = ygo::PendingActionKind::SelectChain;
+	pending.chain_forced = false;
+
+	const ygo::DuelResponse response = ygo::build_chain_pass_response(pending);
+	assert(response.ok);
+	assert(response.bytes == std::vector<std::uint8_t>({
+			0xff, 0xff, 0xff, 0xff,
+	}));
+}
+
+void test_chain_pass_rejects_forced_chain() {
+	ygo::PendingAction pending;
+	pending.kind = ygo::PendingActionKind::SelectChain;
+	pending.chain_forced = true;
+
+	const ygo::DuelResponse response = ygo::build_chain_pass_response(pending);
+	assert(!response.ok);
+	assert(response.message == "强制连锁必须发动一个候选效果");
+	assert(response.bytes.empty());
+}
+
 } // namespace
 
 int main() {
@@ -201,4 +249,8 @@ int main() {
 	test_card_selection_response_encodes_one_uint32_candidate();
 	test_card_selection_cancel_requires_cancelable_select_card();
 	test_card_selection_cancel_encodes_negative_one_as_little_endian_int32();
+	test_chain_response_encodes_current_candidate_index();
+	test_chain_response_rejects_unknown_candidate_index();
+	test_chain_pass_is_allowed_only_for_non_forced_chain();
+	test_chain_pass_rejects_forced_chain();
 }

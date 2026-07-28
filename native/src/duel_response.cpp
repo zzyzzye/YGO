@@ -105,4 +105,48 @@ DuelResponse build_position_response(
 	};
 }
 
+DuelResponse build_chain_response(
+		const PendingAction &pending_action,
+		const std::size_t option_index) {
+	if (pending_action.kind != PendingActionKind::SelectChain) {
+		return {false, "当前不是连锁选择", {}};
+	}
+	const auto candidate = std::find_if(
+			pending_action.chain_options.begin(),
+			pending_action.chain_options.end(),
+			[option_index](const ChainOption &option) {
+				return option.index == option_index;
+			});
+	if (candidate == pending_action.chain_options.end()) {
+		return {false, "连锁候选不属于当前 OCGCore 候选列表", {}};
+	}
+	if (option_index > std::numeric_limits<std::uint32_t>::max()) {
+		return {false, "连锁候选索引超出 OCGCore 协议范围", {}};
+	}
+	// SelectChain 直接读取已选候选的 int32 下标。只允许从快照候选表取值，
+	// 以免 Godot 按卡片或效果描述重新匹配后提交一个已失效的索引。
+	return {
+		true,
+		"",
+		{
+			static_cast<std::uint8_t>(option_index & 0xffU),
+			static_cast<std::uint8_t>((option_index >> 8U) & 0xffU),
+			static_cast<std::uint8_t>((option_index >> 16U) & 0xffU),
+			static_cast<std::uint8_t>((option_index >> 24U) & 0xffU),
+		},
+	};
+}
+
+DuelResponse build_chain_pass_response(const PendingAction &pending_action) {
+	if (pending_action.kind != PendingActionKind::SelectChain) {
+		return {false, "当前不是连锁选择", {}};
+	}
+	if (pending_action.chain_forced) {
+		return {false, "强制连锁必须发动一个候选效果", {}};
+	}
+	// OCGCore 对非强制连锁以 int32(-1) 表示跳过。字面量编码规避宿主端
+	// 字节序和负数对象表示差异，且不会改变当前待处理快照。
+	return {true, "", {0xff, 0xff, 0xff, 0xff}};
+}
+
 } // namespace ygo

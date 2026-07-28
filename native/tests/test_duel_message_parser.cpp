@@ -49,6 +49,26 @@ void append_card_option(
 	append_little_endian<std::uint32_t>(message, position);
 }
 
+void append_chain_option(
+		std::vector<std::uint8_t> &message,
+		const std::uint32_t card_id,
+		const std::uint8_t controller,
+		const std::uint8_t location,
+		const std::uint32_t sequence,
+		const std::uint32_t position,
+		const std::uint64_t description,
+		const std::uint8_t client_mode) {
+	// MSG_SELECT_CHAIN 的候选必须完整保留卡位、效果描述和客户端模式。这里
+	// 手工写入上游固定的 23 字节记录，防止测试与生产解析共用实现细节。
+	append_little_endian<std::uint32_t>(message, card_id);
+	message.push_back(controller);
+	message.push_back(location);
+	append_little_endian<std::uint32_t>(message, sequence);
+	append_little_endian<std::uint32_t>(message, position);
+	append_little_endian<std::uint64_t>(message, description);
+	message.push_back(client_mode);
+}
+
 void test_notification_before_idle_action_does_not_hide_pending_player() {
 	std::vector<std::uint8_t> stream;
 	append_frame(stream, {MSG_NEW_TURN, 0});
@@ -397,6 +417,87 @@ void test_empty_optional_chain_is_safe_to_auto_pass() {
 	assert(pending.message_type == MSG_SELECT_CHAIN);
 }
 
+void test_chain_exposes_each_effect_of_the_same_card_as_a_distinct_option() {
+	std::vector<std::uint8_t> chain{MSG_SELECT_CHAIN, 1, 2, 0};
+	append_little_endian<std::uint32_t>(chain, 0x01020304U);
+	append_little_endian<std::uint32_t>(chain, 0x05060708U);
+	append_little_endian<std::uint32_t>(chain, 2);
+	append_chain_option(
+			chain, 46986414, 1, LOCATION_MZONE, 3, POS_FACEUP_ATTACK,
+			0x1122334455667788ULL, 4);
+	append_chain_option(
+			chain, 46986414, 1, LOCATION_MZONE, 3, POS_FACEUP_ATTACK,
+			0x8877665544332211ULL, 9);
+
+	const std::vector<std::uint8_t> stream = framed(chain);
+	const ygo::PendingAction pending =
+			ygo::parse_pending_action(stream.data(), stream.size());
+
+	assert(pending.kind == ygo::PendingActionKind::SelectChain);
+	assert(pending.player == 1);
+	assert(!pending.chain_forced);
+	assert(pending.chain_options.size() == 2);
+	assert(pending.chain_options[0].index == 0);
+	assert(pending.chain_options[0].card_id == 46986414);
+	assert(pending.chain_options[0].sequence == 3);
+	assert(pending.chain_options[0].description == 0x1122334455667788ULL);
+	assert(pending.chain_options[0].client_mode == 4);
+	assert(pending.chain_options[1].index == 1);
+	assert(pending.chain_options[1].card_id == 46986414);
+	assert(pending.chain_options[1].description == 0x8877665544332211ULL);
+	assert(pending.chain_options[1].client_mode == 9);
+}
+
+void test_chain_rejects_truncated_candidate_without_publishing_options() {
+	std::vector<std::uint8_t> chain{MSG_SELECT_CHAIN, 0, 0, 1};
+	append_little_endian<std::uint32_t>(chain, 0);
+	append_little_endian<std::uint32_t>(chain, 0);
+	append_little_endian<std::uint32_t>(chain, 1);
+	chain.insert(chain.end(), 22, 0);
+
+	const std::vector<std::uint8_t> stream = framed(chain);
+	const ygo::PendingAction pending =
+			ygo::parse_pending_action(stream.data(), stream.size());
+	assert(pending.kind == ygo::PendingActionKind::Malformed);
+	assert(pending.chain_options.empty());
+}
+
+void test_chain_rejects_trailing_bytes_after_candidates() {
+	std::vector<std::uint8_t> chain{MSG_SELECT_CHAIN, 0, 0, 0};
+	append_little_endian<std::uint32_t>(chain, 0);
+	append_little_endian<std::uint32_t>(chain, 0);
+	append_little_endian<std::uint32_t>(chain, 1);
+	append_chain_option(
+			chain, 1, 0, LOCATION_SZONE, 0, POS_FACEDOWN_DEFENSE, 2, 3);
+	chain.push_back(0xff);
+
+	const std::vector<std::uint8_t> stream = framed(chain);
+	const ygo::PendingAction pending =
+			ygo::parse_pending_action(stream.data(), stream.size());
+	assert(pending.kind == ygo::PendingActionKind::Malformed);
+	assert(pending.chain_options.empty());
+}
+
+void test_chain_rejects_invalid_player_and_forced_flag() {
+	std::vector<std::uint8_t> invalid_player{MSG_SELECT_CHAIN, 2, 0, 0};
+	append_little_endian<std::uint32_t>(invalid_player, 0);
+	append_little_endian<std::uint32_t>(invalid_player, 0);
+	append_little_endian<std::uint32_t>(invalid_player, 0);
+	const std::vector<std::uint8_t> invalid_player_stream = framed(invalid_player);
+	assert(ygo::parse_pending_action(
+				invalid_player_stream.data(), invalid_player_stream.size()).kind
+			== ygo::PendingActionKind::Malformed);
+
+	std::vector<std::uint8_t> invalid_forced{MSG_SELECT_CHAIN, 0, 0, 2};
+	append_little_endian<std::uint32_t>(invalid_forced, 0);
+	append_little_endian<std::uint32_t>(invalid_forced, 0);
+	append_little_endian<std::uint32_t>(invalid_forced, 0);
+	const std::vector<std::uint8_t> invalid_forced_stream = framed(invalid_forced);
+	assert(ygo::parse_pending_action(
+				invalid_forced_stream.data(), invalid_forced_stream.size()).kind
+			== ygo::PendingActionKind::Malformed);
+}
+
 void test_all_idle_list_widths_are_consumed_before_flags() {
 	std::vector<std::uint8_t> stream;
 	std::vector<std::uint8_t> idle{MSG_SELECT_IDLECMD, 1};
@@ -579,6 +680,10 @@ int main() {
 	test_select_card_rejects_invalid_second_candidate_controller();
 	test_select_card_rejects_trailing_bytes_after_candidates();
 	test_empty_optional_chain_is_safe_to_auto_pass();
+	test_chain_exposes_each_effect_of_the_same_card_as_a_distinct_option();
+	test_chain_rejects_truncated_candidate_without_publishing_options();
+	test_chain_rejects_trailing_bytes_after_candidates();
+	test_chain_rejects_invalid_player_and_forced_flag();
 	test_all_idle_list_widths_are_consumed_before_flags();
 	test_invalid_player_is_rejected_for_supported_messages();
 	test_all_known_unimplemented_interactions_preserve_message_type();
