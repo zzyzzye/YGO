@@ -701,9 +701,9 @@ func _toggle_debug() -> void:
 func _on_background_input(event: InputEvent) -> void:
 	if event is InputEventMouseButton and event.pressed:
 		_clear_selection()
-		# 规则 Yes/No 的按钮是 OCGCore 当前唯一可推进入口；外部点击只能关闭
-		# restart/phase 等本地确认，不能让核心等待期间把规则入口销毁。
-		if _rule_decision_kind != "yes_no":
+		# 任意规则确认按钮都是 OCGCore 当前唯一可推进入口；外部点击只能关闭
+		# restart/phase 等本地确认，不能让核心等待期间把入口销毁。
+		if _rule_decision_kind == "none":
 			_close_confirmation()
 
 
@@ -722,7 +722,7 @@ func _handle_surface_click(target: Control) -> void:
 		if target == overlay or (target != null and overlay.is_ancestor_of(target)):
 			return
 	_clear_selection()
-	if _rule_decision_kind != "yes_no":
+	if _rule_decision_kind == "none":
 		_close_confirmation()
 
 

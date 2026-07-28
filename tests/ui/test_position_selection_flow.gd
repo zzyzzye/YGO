@@ -115,6 +115,18 @@ func _run() -> void:
 	]:
 		_fail("SelectPosition 必须只按核心候选显示中文原生按钮")
 		return
+	var background_click := InputEventMouseButton.new()
+	background_click.button_index = MOUSE_BUTTON_LEFT
+	background_click.pressed = true
+	board._on_background_input(background_click)
+	board._on_phase_pressed()
+	board._request_restart()
+	if (
+		!board.confirmation_overlay.visible
+		or _button_texts(board.confirmation_buttons) != buttons
+	):
+		_fail("背景、阶段和系统确认不得覆盖 SelectPosition 规则入口")
+		return
 
 	# 本地失败和 MSG_RETRY 都不能关闭入口；重复信号也只能在当前快照仍有效时提交。
 	fake.fail_next = true
