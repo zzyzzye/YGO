@@ -805,9 +805,6 @@ void YgoCoreBridge::_bind_methods() {
 			&YgoCoreBridge::setup_duel);
 	godot::ClassDB::bind_method(godot::D_METHOD("start_duel"), &YgoCoreBridge::start_duel);
 	godot::ClassDB::bind_method(
-			godot::D_METHOD("send_duel_response", "response"),
-			&YgoCoreBridge::send_duel_response);
-	godot::ClassDB::bind_method(
 			godot::D_METHOD("get_pending_action"),
 			&YgoCoreBridge::get_pending_action);
 	godot::ClassDB::bind_method(

@@ -147,8 +147,9 @@ godot::Dictionary pending_action_to_dictionary(const PendingAction &pending) {
 	response["position_options"] = position_options;
 
 	// SelectChain 直接对应 OCGCore 的 MSG_SELECT_CHAIN。每项 index 是当前
-	// 响应窗口的唯一候选索引，description/client_mode 则保留规则层原始语义。
-	// 与卡牌选择一致，对手里侧候选只提供可渲染的槽位信息，绝不泄露 card_id。
+	// 响应窗口的唯一候选索引；位置、表示与 client_mode 可安全用于界面定位。
+	// OCGCore 的 description 常由 Stringid 编码，包含可逆的 card_id 高位，
+	// 所以对手里侧候选必须把 description 与 card_id 放进同一可见性门禁。
 	response["chain_forced"] = pending.chain_forced;
 	godot::Array chain_options;
 	for (const ChainOption &option : pending.chain_options) {
@@ -158,10 +159,10 @@ godot::Dictionary pending_action_to_dictionary(const PendingAction &pending) {
 		item["location"] = option.location;
 		item["sequence"] = static_cast<std::int64_t>(option.sequence);
 		item["position"] = static_cast<std::int64_t>(option.position);
-		item["description"] = static_cast<std::int64_t>(option.description);
 		item["client_mode"] = option.client_mode;
 		if (option.controller == 0 || (option.position & POS_FACEUP) != 0) {
 			item["card_id"] = static_cast<std::int64_t>(option.card_id);
+			item["description"] = static_cast<std::int64_t>(option.description);
 		}
 		chain_options.push_back(item);
 	}

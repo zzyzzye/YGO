@@ -671,10 +671,12 @@ func _rebuild_action_buttons() -> void:
 		for effect_index in range(options.size()):
 			var option: Dictionary = options[effect_index]
 			var button := Button.new()
-			button.text = "发动效果 %s（描述 %s）" % [
-				effect_index + 1,
-				int(option.get("description", 0)),
-			]
+			# 窗口内序号只负责区分同一位置的多个候选，不参与规则提交。
+			# C++ 会为对手里侧候选省略 description，不能用缺省数值代替，否则既
+			# 伪造描述又可能把可逆的 Stringid 身份信息重新带回界面。
+			button.text = "发动效果 %s" % [effect_index + 1]
+			if option.has("description"):
+				button.text += "（描述 %s）" % [int(option.description)]
 			button.pressed.connect(
 				_emit_chain.bind(
 					int(option.get("index", -1)),

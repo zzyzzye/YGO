@@ -192,14 +192,23 @@ class FakeBridge:
 			_chain_option(9, 120001, 0, 4, 0, 2001),
 			_chain_option(10, 130001, 0, 8, 1, 3001),
 			_chain_option(11, 220001, 1, 4, 2, 4001),
+			# 这两个候选镜像 C++ 对对手里侧位置的公开契约：位置相同且只以稳定
+			# index 区分，不包含可由 Stringid 反推身份的 card_id/description。
 			{
 				"index": 12,
 				"controller": 1,
 				"location": 8,
 				"sequence": 3,
 				"position": 8,
-				"description": 5001,
 				"client_mode": 0,
+			},
+			{
+				"index": 29,
+				"controller": 1,
+				"location": 8,
+				"sequence": 3,
+				"position": 8,
+				"client_mode": 1,
 			},
 		]
 
@@ -338,7 +347,6 @@ func _test_all_locations_and_same_card_effects() -> bool:
 		{"row": "player_monster", "sequence": 0, "index": 9},
 		{"row": "player_spell", "sequence": 1, "index": 10},
 		{"row": "opponent_monster", "sequence": 2, "index": 11},
-		{"row": "opponent_spell", "sequence": 3, "index": 12},
 	]:
 		var zone_fake := FakeBridge.new()
 		var zone_main = await _mount_main(zone_fake)
@@ -361,6 +369,36 @@ func _test_all_locations_and_same_card_effects() -> bool:
 		):
 			return false
 		await _unmount_main(zone_main)
+
+	# 对手同一里侧位置可以同时包含多个效果，但 C++ 不会向 Godot 暴露两项的
+	# card_id/description。按钮只能用窗口内不透明序号区分，并继续绑定各自稳定 index。
+	for hidden_choice in [
+		{"button": 0, "index": 12},
+		{"button": 1, "index": 29},
+	]:
+		var hidden_fake := FakeBridge.new()
+		var hidden_main = await _mount_main(hidden_fake)
+		var hidden_board: DuelBoard = hidden_main.board
+		var hidden_zone: ZoneView = hidden_board.opponent_spell_zones[3]
+		var hidden_card: CardView = hidden_zone.card_container.get_child(0)
+		hidden_card.pressed.emit()
+		if !_check(
+			_button_texts(hidden_board.action_box) == [
+				"发动效果 1",
+				"发动效果 2",
+				"不连锁",
+			],
+			"同一对手里侧位置的多个效果必须仅以不透明序号区分"
+		):
+			return false
+		hidden_board.action_box.get_child(int(hidden_choice.button)).pressed.emit()
+		if !_check(
+			hidden_fake.method_calls("submit_chain")
+				== [{"method": "submit_chain", "index": int(hidden_choice.index)}],
+			"隐藏候选按钮必须提交自身稳定索引，不能把窗口序号当作索引"
+		):
+			return false
+		await _unmount_main(hidden_main)
 	return true
 
 
@@ -665,7 +703,6 @@ func _description_for_index(index: int) -> int:
 		9: 2001,
 		10: 3001,
 		11: 4001,
-		12: 5001,
 	}.get(index, -1)
 
 

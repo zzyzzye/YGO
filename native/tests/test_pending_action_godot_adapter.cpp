@@ -128,16 +128,17 @@ void test_position_selection_dictionary_contract() {
 }
 
 void test_chain_dictionary_contract_hides_opponent_facedown_identity() {
-	// 若桥接层遗漏 chain_forced、重排候选，或把对手里侧真实卡号写入
-	// Dictionary，此测试必须失败；这些字段是 Godot 只能据此渲染连锁窗口的
-	// 完整语义边界，不能由界面从 OCGCore 原始消息自行推断。
+	// OCGCore 卡片脚本常用 Stringid(card_id, effect_id)，其高位可直接还原卡号。
+	// 因此对手里侧候选必须同时隐藏 card_id 与 description；仅隐藏前者仍会泄密。
+	constexpr std::uint64_t hidden_string_id =
+			(static_cast<std::uint64_t>(222) << 20U) | 4U;
 	ygo::PendingAction pending;
 	pending.kind = ygo::PendingActionKind::SelectChain;
 	pending.player = 0;
 	pending.chain_forced = true;
 	pending.chain_options = {
 		{7, 111, 0, LOCATION_HAND, 2, POS_FACEDOWN_DEFENSE, 101, 3},
-		{8, 222, 1, LOCATION_SZONE, 3, POS_FACEDOWN_DEFENSE, 202, 4},
+		{8, 222, 1, LOCATION_SZONE, 3, POS_FACEDOWN_DEFENSE, hidden_string_id, 4},
 		{9, 333, 1, LOCATION_MZONE, 4, POS_FACEUP_ATTACK, 303, 5},
 	};
 
@@ -163,17 +164,19 @@ void test_chain_dictionary_contract_hides_opponent_facedown_identity() {
 		require(option.has("location"), "连锁候选必须包含区域");
 		require(option.has("sequence"), "连锁候选必须包含槽位");
 		require(option.has("position"), "连锁候选必须包含表示形式");
-		require(option.has("description"), "连锁候选必须包含效果描述编号");
 		require(option.has("client_mode"), "连锁候选必须包含客户端模式");
 	}
 	require(read_int(local_facedown, "index") == 7, "连锁候选索引不得重排");
 	require(read_int(local_facedown, "card_id") == 111, "本地里侧连锁候选允许公开卡号");
+	require(local_facedown.has("description"), "本地里侧连锁候选应保留效果描述编号");
 	require(
-			!opponent_facedown.has("card_id"),
-			"对手里侧连锁候选不得泄露真实卡号");
+			!opponent_facedown.has("card_id")
+					&& !opponent_facedown.has("description"),
+			"对手里侧连锁候选不得泄露真实卡号或 Stringid 描述");
 	require(
-			read_int(opponent_faceup, "card_id") == 333,
-			"对手正面连锁候选应公开卡号");
+			read_int(opponent_faceup, "card_id") == 333
+					&& opponent_faceup.has("description"),
+			"对手正面连锁候选应公开卡号和效果描述编号");
 }
 
 void test_bridge_rejects_negative_selection_before_narrowing() {
@@ -198,6 +201,11 @@ void test_bridge_rejects_negative_selection_before_narrowing() {
 	require(
 			bridge->has_method(godot::StringName("pass_chain")),
 			"pass_chain 必须绑定到 Godot");
+	// 原始字节响应只为 C++ 兼容测试保留；一旦重新注册到 ClassDB，GDScript
+	// 就能绕过 pending kind、稳定索引和决策代次等语义门禁。
+	require(
+			!bridge->has_method(godot::StringName("send_duel_response")),
+			"send_duel_response 不得绑定到 Godot ClassDB");
 
 	const godot::Dictionary rejected = bridge->submit_card_selection(-1);
 	require(!static_cast<bool>(rejected["ok"]), "负索引必须被拒绝");
