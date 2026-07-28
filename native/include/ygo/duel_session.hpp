@@ -142,4 +142,11 @@ private:
 	[[nodiscard]] ProcessResult process_once();
 };
 
+// 将单机模式推进至本地 OCGCore 玩家编号 0 的下一个决策点。玩家编号 1 的
+// 对手决策采用确定性策略，且仅通过 DuelSession 的语义接口提交；该函数不依赖
+// Godot Variant，因此 Bridge 与原生回归测试共享完全相同的状态机实现。
+[[nodiscard]] ProcessResult advance_to_local_decision(
+		DuelSession &session,
+		ProcessResult result);
+
 } // namespace ygo

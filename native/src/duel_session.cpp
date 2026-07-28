@@ -311,6 +311,62 @@ ProcessResult DuelSession::process_once() {
 	return {true, status, std::move(message), pending_action_, response_rejected};
 }
 
+ProcessResult advance_to_local_decision(DuelSession &session, ProcessResult result) {
+	const auto is_auto_action_pending = [](const ProcessResult &current) {
+		return current.ok
+				&& !current.response_rejected
+				&& current.status != OCG_DUEL_STATUS_END;
+	};
+	constexpr int max_steps = 200;
+	for (int step_index = 0;
+			step_index < max_steps && is_auto_action_pending(result);
+			++step_index) {
+		if (result.pending_action.kind == PendingActionKind::None) {
+			result = session.step();
+			continue;
+		}
+		// 玩家编号 0 是本地玩家，任何待决策（包括 SelectChain）都必须
+		// 原样返回上层。只为编号 1 的自动对手消费决策，避免界面错过窗口。
+		if (result.pending_action.player != 1) {
+			break;
+		}
+		if (result.pending_action.kind == PendingActionKind::SelectChain) {
+			if (result.pending_action.chain_forced) {
+				// 解析器会把“强制但空候选”归为 Malformed；仍在此处保留
+				// 防御性检查，避免策略因不完整快照访问空 vector。
+				if (result.pending_action.chain_options.empty()) {
+					break;
+				}
+				result = session.submit_chain(
+						result.pending_action.chain_options.front().index);
+			} else {
+				result = session.pass_chain();
+			}
+			continue;
+		}
+		if (result.pending_action.kind == PendingActionKind::Idle
+				&& result.pending_action.can_end_turn) {
+			result = session.submit_end_turn();
+			continue;
+		}
+		if (result.pending_action.kind == PendingActionKind::Battle
+				&& result.pending_action.can_end_battle) {
+			result = session.submit_end_battle();
+			continue;
+		}
+		break;
+	}
+	// 达到保险上限却仍没有可交互决策，说明规则消息链异常过长。
+	// 明确向 Godot 报错，避免界面收到 ok=true 后停在无法操作的空状态。
+	if (result.ok
+			&& result.status != OCG_DUEL_STATUS_END
+			&& result.pending_action.kind == PendingActionKind::None) {
+		result.ok = false;
+		result.message = "自动推进超过 200 步，仍未得到可操作决策";
+	}
+	return result;
+}
+
 void DuelSession::set_response(const void *response_data, std::size_t response_size) {
 	if (!is_active()) {
 		return;

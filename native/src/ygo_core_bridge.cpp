@@ -78,62 +78,6 @@ godot::Dictionary process_result_to_dictionary(const ProcessResult &result) {
 	return response;
 }
 
-ProcessResult advance_to_local_decision(DuelSession &session, ProcessResult result) {
-	// 当前单机原型固定玩家1为本地玩家。玩家2使用可重放的确定性策略：
-	// 可选连锁一律跳过，强制连锁一律选择核心候选表的第一项；其余阶段不
-	// 召唤、不发动，空闲阶段结束回合、战斗阶段结束战斗。策略只调用
-	// Session 的语义接口，绝不拼装原始响应，也不会替本地玩家跨过决策。
-	constexpr int max_steps = 200;
-	for (int step_index = 0;
-			step_index < max_steps
-			&& result.ok
-			&& !result.response_rejected
-			&& result.status != OCG_DUEL_STATUS_END;
-			++step_index) {
-		if (result.pending_action.kind == PendingActionKind::None) {
-			result = session.step();
-			continue;
-		}
-		if (result.pending_action.player != 1) {
-			break;
-		}
-		if (result.pending_action.kind == PendingActionKind::SelectChain) {
-			if (result.pending_action.chain_forced) {
-				// 解析器会把“强制但空候选”归为 Malformed；仍在此处保留
-				// 防御性检查，避免策略因不完整快照访问空 vector。
-				if (result.pending_action.chain_options.empty()) {
-					break;
-				}
-				result = session.submit_chain(
-						result.pending_action.chain_options.front().index);
-			} else {
-				result = session.pass_chain();
-			}
-			continue;
-		}
-		if (result.pending_action.kind == PendingActionKind::Idle
-				&& result.pending_action.can_end_turn) {
-			result = session.submit_end_turn();
-			continue;
-		}
-		if (result.pending_action.kind == PendingActionKind::Battle
-				&& result.pending_action.can_end_battle) {
-			result = session.submit_end_battle();
-			continue;
-		}
-		break;
-	}
-	// 达到保险上限却仍没有可交互决策，说明规则消息链异常过长。
-	// 明确向 Godot 报错，避免界面收到 ok=true 后停在无法操作的空状态。
-	if (result.ok
-			&& result.status != OCG_DUEL_STATUS_END
-			&& result.pending_action.kind == PendingActionKind::None) {
-		result.ok = false;
-		result.message = "自动推进超过 200 步，仍未得到可操作决策";
-	}
-	return result;
-}
-
 } // namespace
 
 YgoCoreBridge::YgoCoreBridge() {

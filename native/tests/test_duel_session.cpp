@@ -248,6 +248,62 @@ void test_chain_submission_validates_snapshot_and_recovers_after_retry() {
 			== ygo::PendingActionKind::SelectChain);
 	assert(forced_first_retry.pending_action.chain_forced);
 	assert(forced_first_retry.pending_action.chain_options.front().index == 0);
+
+	// 本地玩家的连锁窗口必须原样交还界面。若自动推进错误地把 player=0
+	// 当作对手，本断言会因响应被消费或 MSG_RETRY 恢复而失败。
+	ygo::PendingAction local_chain = chain;
+	local_chain.player = 0;
+	local_chain.chain_forced = false;
+	session.pending_action_ = local_chain;
+	const ygo::ProcessResult local_stopped = ygo::advance_to_local_decision(
+			session,
+			{true, OCG_DUEL_STATUS_AWAITING, "等待玩家决策输入", local_chain});
+	assert(local_stopped.ok);
+	assert(!local_stopped.response_rejected);
+	assert(local_stopped.pending_action.kind == ygo::PendingActionKind::SelectChain);
+	assert(local_stopped.pending_action.player == 0);
+	assert(!local_stopped.pending_action.chain_forced);
+	assert(session.pending_action().kind == ygo::PendingActionKind::SelectChain);
+	assert(session.pending_action().player == 0);
+
+	// 自动对手的可选窗口必须走 pass_chain；真实 Idle Processor 会拒绝该
+	// SelectChain 字节并返回 MSG_RETRY，因此 response_rejected 证明循环
+	// 的确调用了生产 Session 语义接口，而非只返回输入快照。
+	ygo::PendingAction opponent_optional = chain;
+	opponent_optional.player = 1;
+	opponent_optional.chain_forced = false;
+	session.pending_action_ = opponent_optional;
+	const ygo::ProcessResult optional_advanced = ygo::advance_to_local_decision(
+			session,
+			{true,
+			 OCG_DUEL_STATUS_AWAITING,
+			 "等待玩家决策输入",
+			 opponent_optional});
+	assert(optional_advanced.ok);
+	assert(optional_advanced.response_rejected);
+	assert(optional_advanced.pending_action.kind
+			== ygo::PendingActionKind::SelectChain);
+	assert(optional_advanced.pending_action.player == 1);
+	assert(!optional_advanced.pending_action.chain_forced);
+
+	// 强制窗口则必须提交候选表中的首个稳定索引；若分支反转为跳过，
+	// Session 会在写入前拒绝并返回 ok=false，不能满足此处的 Retry 断言。
+	ygo::PendingAction opponent_forced = opponent_optional;
+	opponent_forced.chain_forced = true;
+	session.pending_action_ = opponent_forced;
+	const ygo::ProcessResult forced_advanced = ygo::advance_to_local_decision(
+			session,
+			{true,
+			 OCG_DUEL_STATUS_AWAITING,
+			 "等待玩家决策输入",
+			 opponent_forced});
+	assert(forced_advanced.ok);
+	assert(forced_advanced.response_rejected);
+	assert(forced_advanced.pending_action.kind
+			== ygo::PendingActionKind::SelectChain);
+	assert(forced_advanced.pending_action.player == 1);
+	assert(forced_advanced.pending_action.chain_forced);
+	assert(forced_advanced.pending_action.chain_options.front().index == 0);
 }
 
 void test_real_direct_attack_is_accepted() {
