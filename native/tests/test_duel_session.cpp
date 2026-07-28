@@ -125,6 +125,34 @@ void test_raw_compatibility_response_advances_pending_decision() {
 	assert(process.pending_action.player == 1);
 }
 
+void test_automatic_chain_strategy_selects_local_stop_pass_or_first_option() {
+	ygo::PendingAction local_chain;
+	local_chain.kind = ygo::PendingActionKind::SelectChain;
+	local_chain.player = 0;
+	local_chain.chain_options = {
+			{17, 100, 0, LOCATION_HAND, 1, POS_FACEUP_ATTACK, 11, 0},
+			{42, 200, 0, LOCATION_SZONE, 3, POS_FACEDOWN_DEFENSE, 22, 1},
+	};
+	const ygo::AutomaticChainDecision local =
+			ygo::decide_automatic_chain_action(local_chain);
+	assert(local.kind == ygo::AutomaticChainDecisionKind::Stop);
+
+	ygo::PendingAction opponent_optional = local_chain;
+	opponent_optional.player = 1;
+	opponent_optional.chain_forced = false;
+	const ygo::AutomaticChainDecision optional =
+			ygo::decide_automatic_chain_action(opponent_optional);
+	assert(optional.kind == ygo::AutomaticChainDecisionKind::Pass);
+
+	ygo::PendingAction opponent_forced = opponent_optional;
+	opponent_forced.chain_forced = true;
+	const ygo::AutomaticChainDecision forced =
+			ygo::decide_automatic_chain_action(opponent_forced);
+	assert(forced.kind == ygo::AutomaticChainDecisionKind::Submit);
+	// 索引故意不是 0，且与第二候选不同；这能捕获硬编码 0 或误选第二项。
+	assert(forced.option_index == 17);
+}
+
 void test_chain_submission_validates_snapshot_and_recovers_after_retry() {
 	const std::filesystem::path root = repository_root();
 	const auto loaded = ygo::CardDatabase::load_json_intersection(
@@ -838,6 +866,7 @@ int main() {
 	test_real_callbacks_create_and_destroy_duel();
 	test_inactive_session_rejects_end_turn();
 	test_raw_compatibility_response_advances_pending_decision();
+	test_automatic_chain_strategy_selects_local_stop_pass_or_first_option();
 	test_chain_submission_validates_snapshot_and_recovers_after_retry();
 	test_real_direct_attack_is_accepted();
 	test_fixed_real_decks_advance_to_second_players_idle_action();

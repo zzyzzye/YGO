@@ -311,6 +311,26 @@ ProcessResult DuelSession::process_once() {
 	return {true, status, std::move(message), pending_action_, response_rejected};
 }
 
+AutomaticChainDecision decide_automatic_chain_action(
+		const PendingAction &pending_action) {
+	if (pending_action.kind != PendingActionKind::SelectChain
+			|| pending_action.player != 1) {
+		return {};
+	}
+	if (!pending_action.chain_forced) {
+		return {AutomaticChainDecisionKind::Pass, 0};
+	}
+	if (pending_action.chain_options.empty()) {
+		// 解析器会将“强制但空候选”标记为 Malformed；这里仍须拒绝手工或
+		// 过期快照，以保证策略层永远不会把无效索引交给 Session。
+		return {};
+	}
+	return {
+			AutomaticChainDecisionKind::Submit,
+			pending_action.chain_options.front().index,
+	};
+}
+
 ProcessResult advance_to_local_decision(DuelSession &session, ProcessResult result) {
 	const auto is_auto_action_pending = [](const ProcessResult &current) {
 		return current.ok
@@ -331,18 +351,17 @@ ProcessResult advance_to_local_decision(DuelSession &session, ProcessResult resu
 			break;
 		}
 		if (result.pending_action.kind == PendingActionKind::SelectChain) {
-			if (result.pending_action.chain_forced) {
-				// 解析器会把“强制但空候选”归为 Malformed；仍在此处保留
-				// 防御性检查，避免策略因不完整快照访问空 vector。
-				if (result.pending_action.chain_options.empty()) {
-					break;
-				}
-				result = session.submit_chain(
-						result.pending_action.chain_options.front().index);
-			} else {
+			const AutomaticChainDecision decision =
+					decide_automatic_chain_action(result.pending_action);
+			if (decision.kind == AutomaticChainDecisionKind::Pass) {
 				result = session.pass_chain();
+				continue;
 			}
-			continue;
+			if (decision.kind == AutomaticChainDecisionKind::Submit) {
+				result = session.submit_chain(decision.option_index);
+				continue;
+			}
+			break;
 		}
 		if (result.pending_action.kind == PendingActionKind::Idle
 				&& result.pending_action.can_end_turn) {

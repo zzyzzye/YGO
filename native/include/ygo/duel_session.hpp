@@ -142,6 +142,24 @@ private:
 	[[nodiscard]] ProcessResult process_once();
 };
 
+// 自动对手在连锁窗口的纯策略结果。option_index 仅在 Submit 时有效；其余
+// 分支保持默认值，调用方不得将其解释为原始 OCGCore 响应。
+enum class AutomaticChainDecisionKind {
+	Stop,
+	Pass,
+	Submit,
+};
+
+struct AutomaticChainDecision {
+	AutomaticChainDecisionKind kind = AutomaticChainDecisionKind::Stop;
+	std::size_t option_index = 0;
+};
+
+// 根据已验证的连锁快照选择自动对手动作：本地玩家及异常快照停止，可选窗口
+// 跳过，强制窗口提交候选表第一项。该函数不写入 OCGCore，便于独立验证策略。
+[[nodiscard]] AutomaticChainDecision decide_automatic_chain_action(
+		const PendingAction &pending_action);
+
 // 将单机模式推进至本地 OCGCore 玩家编号 0 的下一个决策点。玩家编号 1 的
 // 对手决策采用确定性策略，且仅通过 DuelSession 的语义接口提交；该函数不依赖
 // Godot Variant，因此 Bridge 与原生回归测试共享完全相同的状态机实现。
