@@ -22,6 +22,7 @@ const SCENARIO_GENERIC_YES_NO := "通用 YesNo 确认"
 const SCENARIO_CANCELABLE_TARGETS := "可取消目标选择"
 const SCENARIO_SELECT_POSITION := "四种表示形式"
 const SCENARIO_SELECT_CHAIN := "手牌连锁多效果"
+const SCENARIO_SELECT_PLACE := "怪兽区与魔陷区放置候选"
 
 var _failed := false
 
@@ -50,7 +51,7 @@ func _run() -> void:
 		_assert_stretch_contract(physical_size)
 		if _failed:
 			return
-		# 同一场景依次消费六份规则快照，既覆盖每种满载布局，也验证新快照能清除
+		# 同一场景依次消费七份规则快照，既覆盖满载布局与空卡位高亮，也验证新快照能清除
 		# 上一状态的高亮和浮层。物理窗口只在外层切换，保持真实 Stretch 路径。
 		for scenario in _responsive_scenarios():
 			board.render_snapshot(scenario.snapshot)
@@ -176,6 +177,19 @@ func _responsive_scenarios() -> Array[Dictionary]:
 		},
 	]
 
+	var select_place := _maximum_snapshot()
+	# SelectPlace 只能映射空卡位；从满载场景精确移除玩家怪兽区 4 与魔陷区 2，
+	# 其余十八个卡位保持 CardView 满载，才能同时验证高亮与拥挤布局的安全关系。
+	var place_monsters: Array = select_place.player_monsters
+	var place_spells: Array = select_place.player_spells
+	place_monsters.remove_at(3)
+	place_spells.remove_at(1)
+	select_place["decision_kind"] = "select_place"
+	select_place["place_options"] = [
+		{"controller": 0, "location": 4, "sequence": 3},
+		{"controller": 0, "location": 8, "sequence": 1},
+	]
+
 	return [
 		{"name": SCENARIO_DIRECT_ATTACK, "snapshot": direct_attack},
 		{"name": SCENARIO_FIVE_TARGETS, "snapshot": five_targets},
@@ -183,6 +197,7 @@ func _responsive_scenarios() -> Array[Dictionary]:
 		{"name": SCENARIO_CANCELABLE_TARGETS, "snapshot": cancelable_targets},
 		{"name": SCENARIO_SELECT_POSITION, "snapshot": select_position},
 		{"name": SCENARIO_SELECT_CHAIN, "snapshot": select_chain},
+		{"name": SCENARIO_SELECT_PLACE, "snapshot": select_place},
 	]
 
 
@@ -483,8 +498,26 @@ func _assert_populated_layout(
 		+ board.opponent_spell_zones
 	)
 	for zone_index in range(all_zones.size()):
-		if !_assert_full_zone(
-			all_zones[zone_index],
+		var zone: ZoneView = all_zones[zone_index]
+		var is_place_candidate: bool = (
+			scenario_name == SCENARIO_SELECT_PLACE
+			and (
+				zone == board.player_monster_zones[3]
+				or zone == board.player_spell_zones[1]
+			)
+		)
+		if is_place_candidate:
+			if !_assert_empty_place_candidate_zone(
+				zone,
+				logical_rect,
+				safe_rect,
+				physical_size,
+				scenario_name,
+				"放置候选卡位 %s" % [zone_index + 1]
+			):
+				return
+		elif !_assert_full_zone(
+			zone,
 			logical_rect,
 			safe_rect,
 			physical_size,
@@ -691,6 +724,42 @@ func _assert_full_zone(
 	)
 
 
+func _assert_empty_place_candidate_zone(
+	zone: ZoneView,
+	logical_rect: Rect2,
+	safe_rect: Rect2,
+	physical_size: Vector2i,
+	scenario_name: String,
+	zone_name: String
+) -> bool:
+	if (
+		!_assert_control_geometry(
+			zone,
+			logical_rect,
+			safe_rect,
+			physical_size,
+			scenario_name,
+			zone_name
+		)
+		or zone.card_container.get_child_count() != 0
+		or !zone.target_highlight.is_visible_in_tree()
+		or zone.target_highlight.theme_type_variation != &"PlaceCandidate"
+	):
+		_fail("%s 必须是使用 PlaceCandidate 的空原生卡位：窗口 %s" % [
+			zone_name,
+			physical_size,
+		])
+		return false
+	return _assert_control_geometry(
+		zone.target_highlight,
+		logical_rect,
+		safe_rect,
+		physical_size,
+		scenario_name,
+		zone_name + " 高亮"
+	)
+
+
 func _assert_scenario_layout(
 	board: DuelBoard,
 	logical_rect: Rect2,
@@ -876,6 +945,83 @@ func _assert_scenario_layout(
 			scenario_name,
 			"连锁动作条"
 		)
+	elif scenario_name == SCENARIO_SELECT_PLACE:
+		_assert_place_candidate_layout(
+			board,
+			safe_rect,
+			physical_size,
+			scenario_name
+		)
+
+
+func _assert_place_candidate_layout(
+	board: DuelBoard,
+	safe_rect: Rect2,
+	physical_size: Vector2i,
+	scenario_name: String
+) -> void:
+	var candidate_zones: Array[ZoneView] = [
+		board.player_monster_zones[3],
+		board.player_spell_zones[1],
+	]
+	var all_zones := (
+		board.player_monster_zones
+		+ board.player_spell_zones
+		+ board.opponent_monster_zones
+		+ board.opponent_spell_zones
+	)
+	var visible_place_count := 0
+	for zone in all_zones:
+		if (
+			zone.target_highlight.is_visible_in_tree()
+			and zone.target_highlight.theme_type_variation == &"PlaceCandidate"
+		):
+			visible_place_count += 1
+	if visible_place_count != candidate_zones.size():
+		_fail("区域选择必须恰好显示怪兽区与魔陷区两个高亮：窗口 %s，实际 %s 个" % [
+			physical_size,
+			visible_place_count,
+		])
+		return
+	var player_hand_rect := _content_rect_for_hand(board.player_hand)
+	var phase_rect := board.phase_button.get_global_rect()
+	var exit_button := board.find_child("ExitButton", true, false)
+	if !(exit_button is Button):
+		_fail("区域选择响应式场景缺少退出按钮：窗口 " + str(physical_size))
+		return
+	var exit_rect := (exit_button as Button).get_global_rect()
+	for candidate_zone in candidate_zones:
+		var highlight_rect := candidate_zone.target_highlight.get_global_rect()
+		if (
+			!safe_rect.encloses(highlight_rect)
+			or highlight_rect.intersects(player_hand_rect)
+			or highlight_rect.intersects(phase_rect)
+			or highlight_rect.intersects(exit_rect)
+		):
+			_fail(
+				"区域高亮必须位于 SafeArea 且不遮挡手牌、阶段球或退出按钮："
+				+ "窗口 %s，高亮 %s" % [physical_size, highlight_rect]
+			)
+			return
+	if (
+		board.action_box.is_visible_in_tree()
+		or board.confirmation_overlay.is_visible_in_tree()
+	):
+		_fail("区域选择不得额外显示动作条或确认层：窗口 " + str(physical_size))
+
+
+func _content_rect_for_hand(hand: HandView) -> Rect2:
+	var content_rect := Rect2()
+	for child_index in range(hand.get_child_count()):
+		var child := hand.get_child(child_index)
+		if child is CardView:
+			var child_rect := (child as CardView).get_global_rect()
+			content_rect = (
+				child_rect
+				if content_rect.size == Vector2.ZERO
+				else content_rect.merge(child_rect)
+			)
+	return content_rect
 
 
 func _assert_five_target_highlights(
