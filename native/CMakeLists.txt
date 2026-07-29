@@ -145,6 +145,7 @@ add_subdirectory(
 add_library(ygo_core SHARED
 	src/register_types.cpp
 	src/pending_action_godot_adapter.cpp
+	src/process_result_godot_adapter.cpp
 	src/ygo_core_bridge.cpp
 )
 target_include_directories(ygo_core PRIVATE include)
@@ -182,6 +183,7 @@ func _initialize() -> void:
 file(MAKE_DIRECTORY "${PENDING_ACTION_ADAPTER_TEST_PROJECT}/.godot")
 add_library(test_pending_action_godot_adapter SHARED
 	src/pending_action_godot_adapter.cpp
+	src/process_result_godot_adapter.cpp
 	src/ygo_core_bridge.cpp
 	tests/test_pending_action_godot_adapter.cpp
 )

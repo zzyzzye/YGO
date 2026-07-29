@@ -1,4 +1,5 @@
 #include "ygo/pending_action_godot_adapter.hpp"
+#include "ygo/process_result_godot_adapter.hpp"
 #include "ygo/ygo_core_bridge.hpp"
 
 #include "ocgapi_constants.h"
@@ -165,6 +166,52 @@ void test_place_selection_dictionary_uses_semantic_kind() {
 					&& read_int(opponent_spell_zone, "location") == LOCATION_SZONE
 					&& read_int(opponent_spell_zone, "sequence") == 1,
 			"对手区域候选必须按控制者、区域和序号完整发布");
+}
+
+void test_rejected_process_result_preserves_place_pending() {
+	ygo::ProcessResult result;
+	result.ok = true;
+	result.status = OCG_DUEL_STATUS_AWAITING;
+	result.message = "OCGCore 拒绝区域响应";
+	result.response_rejected = true;
+	result.pending_action.kind = ygo::PendingActionKind::SelectPlace;
+	result.pending_action.player = 0;
+	result.pending_action.message_type = MSG_SELECT_PLACE;
+	result.pending_action.message = "请选择效果放置区域";
+	result.pending_action.place_options = {
+		{0, LOCATION_MZONE, 3},
+		{1, LOCATION_SZONE, 1},
+	};
+
+	const godot::Dictionary converted =
+			ygo::process_result_to_dictionary(result);
+	require(static_cast<bool>(converted["ok"]), "Retry 结果必须保留成功推进语义");
+	require(
+			read_int(converted, "status") == OCG_DUEL_STATUS_AWAITING,
+			"Retry 结果必须保留等待输入状态");
+	require(
+			static_cast<bool>(converted["response_rejected"]),
+			"生产结果转换必须透传 OCGCore 的响应拒绝标志");
+
+	const godot::Dictionary pending = converted["pending_action"];
+	require(
+			static_cast<godot::String>(pending["kind"])
+					== godot::String("select_place"),
+			"Retry 结果必须恢复 select_place 待处理动作");
+	const godot::Array options = pending["place_options"];
+	require(options.size() == 2, "Retry 结果必须完整恢复全部区域候选");
+	const godot::Dictionary local_monster_zone = options[0];
+	const godot::Dictionary opponent_spell_zone = options[1];
+	require(
+			read_int(local_monster_zone, "controller") == 0
+					&& read_int(local_monster_zone, "location") == LOCATION_MZONE
+					&& read_int(local_monster_zone, "sequence") == 3,
+			"Retry 结果必须完整保留本地怪兽区三元组");
+	require(
+			read_int(opponent_spell_zone, "controller") == 1
+					&& read_int(opponent_spell_zone, "location") == LOCATION_SZONE
+					&& read_int(opponent_spell_zone, "sequence") == 1,
+			"Retry 结果必须完整保留对手魔陷区三元组");
 }
 
 void test_bridge_submits_only_current_place_option_to_real_session() {
@@ -469,6 +516,7 @@ void run_contract_tests() {
 	test_card_selection_hides_opponent_facedown_identity();
 	test_position_selection_dictionary_contract();
 	test_place_selection_dictionary_uses_semantic_kind();
+	test_rejected_process_result_preserves_place_pending();
 	test_bridge_submits_only_current_place_option_to_real_session();
 	test_place_submission_gate_rejects_nonlocal_and_finished_pending();
 	test_chain_dictionary_contract_hides_opponent_facedown_identity();
