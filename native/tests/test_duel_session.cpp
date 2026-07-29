@@ -942,6 +942,7 @@ void test_fixed_real_decks_advance_to_second_players_idle_action() {
 			replay.query_cards(0, LOCATION_MZONE);
 	assert(replay_monster_zone.size() == 1);
 	assert(replay_monster_zone.front().card_id == summoned_card_id);
+	assert(replay_monster_zone.front().location == LOCATION_MZONE);
 	assert(replay_monster_zone.front().sequence == 3);
 	replay_process = replay.submit_end_turn();
 	for (int step_index = 0;

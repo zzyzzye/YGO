@@ -342,10 +342,20 @@ git commit -m "feat(界面): 以原生卡位选择放置区域"
 首项，调用 `submit_place`，再用 `query_cards` 断言目标卡的
 `location/sequence` 与所选候选完全一致。相同牌组与种子重放，决策序列一致。
 
-- [ ] **Step 2: 增加独立 Godot 流程与响应式场景**
+- [ ] **Step 2: 增加独立 Godot 流程、分层门禁证据与响应式场景**
 
-`test_place_selection_flow.gd` 覆盖候选点击、伪造输入、Retry、双击、旧代次和
-重开。响应式测试增加同时包含怪兽区、魔陷区候选的场景，并在
+`test_place_selection_flow.gd` 只覆盖生产输入可以真实到达的端到端路径：候选与
+非候选卡位点击、完整双击和重开。它必须实例化生产 Main、DuelBoard 与
+YgoCoreBridge，并通过 `SubViewport.push_input()` 进入真实 GUI 命中链；不得
+直接发射 `place_requested` 或调用私有恢复函数来伪造全链路。
+
+安全 Bridge 不会主动生成伪造候选或旧代次输入，合法 OCGCore PlaceOption 也不会
+自然触发 Retry，因此这些门禁采用分层证明：Task 2 的真实 OCGCore 测试验证
+MSG_RETRY 完整恢复 SelectPlace 快照；Task 4 的 Main FakeBridge 测试验证
+`response_rejected` 同代重建、伪造候选和 old generation 门禁。Task 5 完整套件
+必须同时运行这些已有测试，不能在生产 E2E 中复制或绕过边界。
+
+响应式测试增加同时包含怪兽区、魔陷区候选的场景，并在
 1920×1080、3840×2160、1920×1200 断言高亮矩形位于 SafeArea 且不遮挡手牌、
 阶段按钮或退出按钮。
 
