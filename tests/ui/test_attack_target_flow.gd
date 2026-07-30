@@ -100,6 +100,12 @@ class FakeBridge:
 	func get_pending_action() -> Dictionary:
 		return pending.duplicate(true)
 
+	func get_card(card_id: int) -> Dictionary:
+		return {
+			"ok": card_id == 89631139,
+			"cn_name": "青眼白龙" if card_id == 89631139 else "",
+		}
+
 	func submit_battle_action(action_kind: String, index: int) -> Dictionary:
 		calls.append({"method": "submit_battle_action", "kind": action_kind, "index": index})
 		if _consume_failure("submit_battle_action"):
@@ -129,6 +135,21 @@ class FakeBridge:
 		else:
 			pending = _select_card_pending(select_options)
 		return _success("是/否已提交")
+
+	func submit_effect_yes_no(accepted: bool) -> Dictionary:
+		calls.append({"method": "submit_effect_yes_no", "accepted": accepted})
+		# 与普通 YesNo 相同，在 Bridge 返回前重入 EffectYesNo，证明 Main 的
+		# 提交锁覆盖新增入口，而不是依赖按钮恰好只发出一次信号。
+		var callback := reentrant_direct_request
+		reentrant_direct_request = Callable()
+		if callback.is_valid():
+			callback.call()
+		if _consume_failure("submit_effect_yes_no"):
+			return _failure("测试效果确认失败")
+		if _consume_rejection("submit_effect_yes_no"):
+			return _rejection("OCGCore 拒绝了测试效果确认响应")
+		pending = _battle_pending()
+		return _success("效果确认已提交")
 
 	func submit_card_selection(index: int) -> Dictionary:
 		calls.append({"method": "submit_card_selection", "index": index})
@@ -859,13 +880,100 @@ func _test_cancel_generic_yes_no_restart_and_game_over_cleanup() -> bool:
 	):
 		return false
 
+	fake.pending = {
+		"kind": "effect_yes_no",
+		"player": 0,
+		"description": 77,
+		"effect_card_id": 89631139,
+		"effect_controller": 0,
+		"effect_location": 4,
+		"effect_sequence": 0,
+		"effect_position": 1,
+	}
+	main._refresh_board("测试效果发动确认")
+	var effect_generation: int = board._rule_decision_generation
+	var ordinary_yes_no_count := fake.method_calls("submit_yes_no").size()
+	board.confirmation_buttons.get_child(0).pressed.emit()
+	var effect_calls := fake.method_calls("submit_effect_yes_no")
+	if !_check(
+		effect_calls.size() == 1
+			and bool(effect_calls[0].accepted)
+			and fake.method_calls("submit_yes_no").size()
+					== ordinary_yes_no_count,
+		"EffectYesNo 必须调用独立 Bridge 方法，不能误用普通 YesNo"
+	):
+		return false
+
+	fake.pending = {
+		"kind": "effect_yes_no",
+		"player": 0,
+		"description": 77,
+		"effect_card_id": 89631139,
+		"effect_controller": 0,
+		"effect_location": 4,
+		"effect_sequence": 0,
+		"effect_position": 1,
+	}
+	fake.reject_next_method = "submit_effect_yes_no"
+	main._refresh_board("测试效果确认 Retry")
+	var retry_generation: int = board._rule_decision_generation
+	board.confirmation_buttons.get_child(1).pressed.emit()
+	if !_check(
+		retry_generation == effect_generation + 2
+			and board._rule_decision_generation == retry_generation
+			and board.status_label.text
+					== "OCGCore 拒绝了响应，请重新选择是否发动效果"
+			and board.confirmation_overlay.visible,
+		"EffectYesNo Retry 必须保留本次代次并显示专用重试提示"
+	):
+		return false
+
+	fake.fail_next_method = "submit_effect_yes_no"
+	var failed_effect_count := fake.method_calls("submit_effect_yes_no").size()
+	board.confirmation_buttons.get_child(0).pressed.emit()
+	if !_check(
+		fake.method_calls("submit_effect_yes_no").size()
+				== failed_effect_count + 1
+			and board.confirmation_overlay.visible
+			and board.status_label.text
+					== "效果确认提交失败：测试效果确认失败",
+		"EffectYesNo 本地失败必须解锁并保留当前确认快照"
+	):
+		return false
+
+	var reentrant_generation: int = board._rule_decision_generation
+	var reentrant_effect_count := fake.method_calls("submit_effect_yes_no").size()
+	fake.reentrant_direct_request = func() -> void:
+		main._on_effect_yes_no_requested(true, reentrant_generation)
+	board.confirmation_buttons.get_child(1).pressed.emit()
+	if !_check(
+		fake.method_calls("submit_effect_yes_no").size()
+				== reentrant_effect_count + 1,
+		"EffectYesNo 在 Bridge 返回前重入时必须由提交锁拒绝第二次响应"
+	):
+		return false
+
 	main._pending_attack_target_preview = {
 		"controller": 1,
 		"location": 4,
 		"sequence": 2,
 	}
-	fake.pending = fake._battle_pending()
-	main._refresh_board("测试重新开局")
+	fake.pending = {
+		"kind": "effect_yes_no",
+		"player": 0,
+		"description": 77,
+		"effect_card_id": 89631139,
+		"effect_controller": 0,
+		"effect_location": 4,
+		"effect_sequence": 0,
+		"effect_position": 1,
+	}
+	main._refresh_board("测试效果确认时重新开局")
+	if !_check(
+		board.confirmation_overlay.visible and !board.exit_button.disabled,
+		"EffectYesNo 等待态不得禁用退出脱困入口"
+	):
+		return false
 	board.restart_button.pressed.emit()
 	board.confirmation_buttons.get_child(0).pressed.emit()
 	if !_check(
@@ -914,8 +1022,11 @@ func _test_cancel_generic_yes_no_restart_and_game_over_cleanup() -> bool:
 	main._refresh_board("测试终局清理")
 	var terminal_selection_count := fake.method_calls("submit_card_selection").size()
 	var terminal_cancel_count := fake.method_calls("cancel_card_selection").size()
+	var terminal_effect_count := fake.method_calls("submit_effect_yes_no").size()
+	var terminal_effect_generation: int = board._rule_decision_generation
 	board.attack_target_requested.emit(31)
 	board.card_selection_cancel_requested.emit()
+	board.effect_yes_no_requested.emit(true, terminal_effect_generation)
 	if !_check(
 		main._pending_attack_target_preview.is_empty()
 			and main._attack_target_context_state == main.ATTACK_CONTEXT_NONE
@@ -923,7 +1034,9 @@ func _test_cancel_generic_yes_no_restart_and_game_over_cleanup() -> bool:
 			and !board.opponent_monster_zones[0].target_highlight.visible
 			and !board.action_box.visible
 			and fake.method_calls("submit_card_selection").size() == terminal_selection_count
-			and fake.method_calls("cancel_card_selection").size() == terminal_cancel_count,
+			and fake.method_calls("cancel_card_selection").size() == terminal_cancel_count
+			and fake.method_calls("submit_effect_yes_no").size()
+					== terminal_effect_count,
 		"终局快照必须清除攻击来源上下文、预选和高亮，并拒绝残留候选或取消信号"
 	):
 		return false

@@ -22,6 +22,9 @@ struct DuelResponse {
 [[nodiscard]] DuelResponse build_yes_no_response(
 		const PendingAction &pending_action,
 		bool accepted);
+[[nodiscard]] DuelResponse build_effect_yes_no_response(
+		const PendingAction &pending_action,
+		bool accepted);
 [[nodiscard]] DuelResponse build_card_selection_response(
 		const PendingAction &pending_action,
 		std::size_t option_index);

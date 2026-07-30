@@ -38,6 +38,21 @@ std::shared_ptr<ygo::CardDatabase> create_database() {
 	return ygo::CardDatabase::from_records(std::move(records), {});
 }
 
+std::shared_ptr<ygo::CardDatabase> create_effect_test_database() {
+	ygo::CardRecord record;
+	record.display.cid = 4007;
+	record.display.cn_name = "效果确认测试怪兽";
+	record.rule.code = 89631139;
+	record.rule.type = TYPE_MONSTER | TYPE_EFFECT;
+	record.rule.level = 4;
+	record.rule.attack = 1000;
+	record.rule.defense = 1000;
+
+	std::map<std::uint32_t, ygo::CardRecord> records;
+	records.emplace(record.rule.code, std::move(record));
+	return ygo::CardDatabase::from_records(std::move(records), {});
+}
+
 ygo::ProcessResult advance_through_place_requests(
 		ygo::DuelSession &session,
 		const ygo::ProcessResult &process) {
@@ -209,6 +224,131 @@ void test_automatic_place_strategy_only_submits_opponent_first_option() {
 	wrong_kind.kind = ygo::PendingActionKind::Idle;
 	assert(ygo::decide_automatic_place_action(wrong_kind).kind
 			== ygo::AutomaticPlaceDecisionKind::Stop);
+}
+
+void test_automatic_effect_yes_no_declines_only_for_opponent() {
+	ygo::PendingAction opponent_effect;
+	opponent_effect.kind = ygo::PendingActionKind::EffectYesNo;
+	opponent_effect.player = 1;
+	const ygo::AutomaticEffectYesNoDecision opponent =
+			ygo::decide_automatic_effect_yes_no_action(opponent_effect);
+	assert(opponent.kind
+			== ygo::AutomaticEffectYesNoDecisionKind::Decline);
+
+	ygo::PendingAction local_effect = opponent_effect;
+	local_effect.player = 0;
+	assert(ygo::decide_automatic_effect_yes_no_action(local_effect).kind
+			== ygo::AutomaticEffectYesNoDecisionKind::Stop);
+
+	ygo::PendingAction wrong_kind = opponent_effect;
+	wrong_kind.kind = ygo::PendingActionKind::YesNo;
+	assert(ygo::decide_automatic_effect_yes_no_action(wrong_kind).kind
+			== ygo::AutomaticEffectYesNoDecisionKind::Stop);
+}
+
+void test_real_core_effect_yes_no_submits_located_source_and_auto_declines() {
+	ygo::test::TemporaryDirectory fixture;
+	fixture.write_text("scripts/constant.lua", "");
+	fixture.write_text("scripts/utility.lua", "");
+	const std::filesystem::path project_root =
+			std::filesystem::path(__FILE__).parent_path().parent_path().parent_path();
+	std::filesystem::copy_file(
+			project_root / "third_party/CardScripts/constant.lua",
+			fixture.path("scripts/constant.lua"),
+			std::filesystem::copy_options::overwrite_existing);
+	std::filesystem::copy_file(
+			project_root / "third_party/CardScripts/utility.lua",
+			fixture.path("scripts/utility.lua"),
+			std::filesystem::copy_options::overwrite_existing);
+	fixture.write_text(
+			"scripts/official/c89631139.lua",
+			"local s,id=GetID()\n"
+			"function s.initial_effect(c)\n"
+			"  local e=Effect.CreateEffect(c)\n"
+			"  e:SetType(EFFECT_TYPE_SINGLE+EFFECT_TYPE_TRIGGER_F)\n"
+			"  e:SetCode(EVENT_SUMMON_SUCCESS)\n"
+			"  e:SetOperation(s.operation)\n"
+			"  c:RegisterEffect(e)\n"
+			"end\n"
+			"function s.operation(e,tp)\n"
+			"  Duel.SelectEffectYesNo(tp,e:GetHandler(),96)\n"
+			"end\n");
+
+	auto scripts = std::make_shared<ygo::OfficialScriptLoader>(
+			fixture.path("scripts"));
+	const std::vector<std::uint32_t> deck(40, 89631139);
+	ygo::DuelSession session(create_effect_test_database(), scripts);
+	assert(session.create(0x454646454354ULL).ok);
+	assert(session.add_deck_cards(0, deck, LOCATION_DECK).added == 40);
+	assert(session.add_deck_cards(1, deck, LOCATION_DECK).added == 40);
+
+	auto advance_none = [&session](ygo::ProcessResult process) {
+		for (int step_index = 0;
+			step_index < 100
+			&& process.pending_action.kind == ygo::PendingActionKind::None;
+			++step_index) {
+			process = session.step();
+		}
+		return process;
+	};
+	auto summon_until_effect = [&session, &advance_none](
+			ygo::ProcessResult process) {
+		assert(process.pending_action.kind == ygo::PendingActionKind::Idle);
+		const auto summon = std::find_if(
+				process.pending_action.idle_actions.begin(),
+				process.pending_action.idle_actions.end(),
+				[](const ygo::IdleAction &action) {
+					return action.kind == ygo::IdleActionKind::NormalSummon;
+				});
+		assert(summon != process.pending_action.idle_actions.end());
+		process = advance_none(
+				session.submit_idle_action(summon->kind, summon->index));
+		assert(process.pending_action.kind == ygo::PendingActionKind::SelectPlace);
+		assert(!process.pending_action.place_options.empty());
+		const ygo::PlaceOption place =
+				process.pending_action.place_options.front();
+		process = advance_none(session.submit_place(
+				place.player,
+				place.location,
+				place.sequence));
+		return process;
+	};
+
+	ygo::ProcessResult process = advance_none(session.start());
+	process = summon_until_effect(process);
+	assert(process.pending_action.kind == ygo::PendingActionKind::EffectYesNo);
+	assert(process.pending_action.player == 0);
+	assert(process.pending_action.effect_card_id == 89631139);
+	assert(process.pending_action.effect_controller == 0);
+	assert(process.pending_action.effect_location == LOCATION_MZONE);
+	assert(process.pending_action.effect_sequence == 0);
+	const std::array<std::uint8_t, 4> invalid_effect_response{2, 0, 0, 0};
+	session.set_response(
+			invalid_effect_response.data(),
+			invalid_effect_response.size());
+	process = session.step();
+	assert(process.ok);
+	assert(process.response_rejected);
+	assert(process.pending_action.kind == ygo::PendingActionKind::EffectYesNo);
+	assert(process.pending_action.effect_card_id == 89631139);
+	assert(process.pending_action.effect_controller == 0);
+	assert(process.pending_action.effect_location == LOCATION_MZONE);
+	assert(process.pending_action.effect_sequence == 0);
+	process = advance_none(session.submit_effect_yes_no(false));
+	assert(process.ok);
+	assert(process.pending_action.kind == ygo::PendingActionKind::Idle);
+
+	process = advance_none(session.submit_end_turn());
+	assert(process.pending_action.kind == ygo::PendingActionKind::Idle);
+	assert(process.pending_action.player == 1);
+	process = summon_until_effect(process);
+	assert(process.pending_action.kind == ygo::PendingActionKind::EffectYesNo);
+	assert(process.pending_action.player == 1);
+	const ygo::ProcessResult advanced =
+			ygo::advance_to_local_decision(session, process);
+	assert(advanced.ok);
+	assert(advanced.pending_action.kind == ygo::PendingActionKind::Idle);
+	assert(advanced.pending_action.player == 0);
 }
 
 void test_fixed_real_decks_offer_local_chain_and_continue_after_response() {
@@ -1185,6 +1325,8 @@ int main() {
 	test_raw_compatibility_response_advances_pending_decision();
 	test_automatic_chain_strategy_selects_local_stop_pass_or_first_option();
 	test_automatic_place_strategy_only_submits_opponent_first_option();
+	test_automatic_effect_yes_no_declines_only_for_opponent();
+	test_real_core_effect_yes_no_submits_located_source_and_auto_declines();
 	test_fixed_real_decks_offer_local_chain_and_continue_after_response();
 	test_chain_submission_validates_snapshot_and_recovers_after_retry();
 	test_real_direct_attack_is_accepted();

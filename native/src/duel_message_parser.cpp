@@ -304,6 +304,64 @@ ygo::PendingAction parse_yes_no_message(
 	return pending;
 }
 
+ygo::PendingAction parse_effect_yes_no_message(
+		const std::uint8_t *data,
+		const std::size_t size) {
+	ByteReader reader(data, size);
+	std::uint8_t message_type = 0;
+	std::uint8_t player = 0;
+	std::uint32_t card_id = 0;
+	std::uint8_t controller = 0;
+	std::uint8_t location = 0;
+	std::uint32_t sequence = 0;
+	std::uint32_t position = 0;
+	std::uint64_t description = 0;
+	if (!reader.read_u8(message_type)
+			|| !reader.read_u8(player)
+			|| !reader.read_u32(card_id)
+			|| !reader.read_u8(controller)
+			|| !reader.read_u8(location)
+			|| !reader.read_u32(sequence)
+			|| !reader.read_u32(position)
+			|| !reader.read_u64(description)
+			|| reader.remaining() != 0) {
+		return {
+				ygo::PendingActionKind::Malformed,
+				-1,
+				false,
+				MSG_SELECT_EFFECTYN,
+				"效果发动确认消息长度不是固定的 24 字节",
+		};
+	}
+	// loc_info 的 location 必须是单一非零标志位；组合区域无法稳定映射到一张
+	// 来源卡，不能把含糊位置交给 Godot 猜测。
+	if (player > 1 || controller > 1 || location == 0
+			|| (location & static_cast<std::uint8_t>(location - 1U)) != 0) {
+		return {
+				ygo::PendingActionKind::Malformed,
+				-1,
+				false,
+				MSG_SELECT_EFFECTYN,
+				"效果发动确认消息包含非法玩家或卡片位置",
+		};
+	}
+
+	ygo::PendingAction pending{
+			ygo::PendingActionKind::EffectYesNo,
+			static_cast<int>(player),
+			false,
+			MSG_SELECT_EFFECTYN,
+			"等待玩家确认是否发动卡片效果",
+	};
+	pending.description = description;
+	pending.effect_card_id = card_id;
+	pending.effect_controller = controller;
+	pending.effect_location = location;
+	pending.effect_sequence = sequence;
+	pending.effect_position = position;
+	return pending;
+}
+
 ygo::PendingAction malformed_select_card_message() {
 	return {
 			ygo::PendingActionKind::Malformed,
@@ -732,6 +790,8 @@ PendingAction parse_pending_action(
 			pending = parse_idle_message(frame, frame_size);
 		} else if (frame[0] == MSG_SELECT_BATTLECMD) {
 			pending = parse_battle_message(frame, frame_size);
+		} else if (frame[0] == MSG_SELECT_EFFECTYN) {
+			pending = parse_effect_yes_no_message(frame, frame_size);
 		} else if (frame[0] == MSG_SELECT_YESNO) {
 			pending = parse_yes_no_message(frame, frame_size);
 		} else if (frame[0] == MSG_SELECT_CARD) {

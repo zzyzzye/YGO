@@ -19,6 +19,7 @@ var _attack_target_preview_events: Array = []
 var _attack_target_events: Array = []
 var _card_selection_cancel_events: Array = []
 var _yes_no_events: Array = []
+var _effect_yes_no_events: Array = []
 var _place_events: Array = []
 var _input_viewport: SubViewport
 
@@ -354,6 +355,7 @@ func _run() -> void:
 		&"attack_target_requested",
 		&"card_selection_cancel_requested",
 		&"yes_no_requested",
+		&"effect_yes_no_requested",
 		&"place_requested",
 	]:
 		if !board.has_signal(required_signal):
@@ -373,6 +375,10 @@ func _run() -> void:
 	)
 	board.yes_no_requested.connect(func(accepted: bool) -> void:
 		_yes_no_events.append(accepted)
+	)
+	board.effect_yes_no_requested.connect(
+		func(accepted: bool, generation: int) -> void:
+			_effect_yes_no_events.append([accepted, generation])
 	)
 	board.place_requested.connect(
 		func(
@@ -686,6 +692,43 @@ func _run() -> void:
 	board.confirmation_buttons.get_child(1).pressed.emit()
 	if _yes_no_events != [true, false]:
 		_fail("通用 Yes/No 的“否”必须原样发出 false")
+		return
+
+	var effect_snapshot := {
+		"decision_kind": "effect_yes_no",
+		"local_player_turn": true,
+		"effect_card_name": "青眼白龙",
+		"effect_card_id": 89631139,
+		"effect_controller": 0,
+		"effect_location": 4,
+		"effect_sequence": 0,
+		"effect_position": 1,
+	}
+	board.render_snapshot(effect_snapshot)
+	var effect_generation: int = board._rule_decision_generation
+	if (
+		board._rule_decision_kind != "effect_yes_no"
+		or !board.confirmation_overlay.visible
+		or board.confirmation_label.text != "是否发动「青眼白龙」的效果？"
+		or board.confirmation_buttons.get_child_count() != 2
+		or board.confirmation_buttons.get_child(0).text != "发动"
+		or board.confirmation_buttons.get_child(1).text != "不发动"
+		or board.status_label.text != "请选择是否发动卡片效果"
+	):
+		_fail("EffectYesNo 必须显示独立的情境确认和首次等待提示")
+		return
+	board.confirmation_buttons.get_child(1).pressed.emit()
+	if _effect_yes_no_events != [[false, effect_generation]]:
+		_fail("EffectYesNo 必须携带当前代次独立提交“不发动”")
+		return
+	board.render_snapshot(effect_snapshot)
+	var next_effect_generation: int = board._rule_decision_generation
+	board._emit_effect_yes_no(true, effect_generation)
+	if (
+		next_effect_generation == effect_generation
+		or _effect_yes_no_events.size() != 1
+	):
+		_fail("旧代次 EffectYesNo 入口不得提交新快照")
 		return
 
 	board.render_snapshot(attack_route_snapshot)

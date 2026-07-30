@@ -316,6 +316,15 @@ AutomaticPlaceDecision decide_automatic_place_action(
 	};
 }
 
+AutomaticEffectYesNoDecision decide_automatic_effect_yes_no_action(
+		const PendingAction &pending_action) {
+	if (pending_action.kind != PendingActionKind::EffectYesNo
+			|| pending_action.player != 1) {
+		return {};
+	}
+	return {AutomaticEffectYesNoDecisionKind::Decline};
+}
+
 ProcessResult advance_to_local_decision(DuelSession &session, ProcessResult result) {
 	const auto is_auto_action_pending = [](const ProcessResult &current) {
 		return current.ok
@@ -356,6 +365,16 @@ ProcessResult advance_to_local_decision(DuelSession &session, ProcessResult resu
 						decision.option.player,
 						decision.option.location,
 						decision.option.sequence);
+				continue;
+			}
+			break;
+		}
+		if (result.pending_action.kind == PendingActionKind::EffectYesNo) {
+			const AutomaticEffectYesNoDecision decision =
+					decide_automatic_effect_yes_no_action(result.pending_action);
+			if (decision.kind
+					== AutomaticEffectYesNoDecisionKind::Decline) {
+				result = session.submit_effect_yes_no(false);
 				continue;
 			}
 			break;
@@ -529,6 +548,30 @@ ProcessResult DuelSession::submit_yes_no(const bool accepted) {
 	}
 	const DuelResponse response =
 			build_yes_no_response(pending_action_, accepted);
+	if (!response.ok) {
+		return {
+				false,
+				OCG_DUEL_STATUS_AWAITING,
+				response.message,
+				pending_action_,
+		};
+	}
+
+	last_submitted_action_ = pending_action_;
+	OCG_DuelSetResponse(
+			static_cast<OCG_Duel>(duel_),
+			response.bytes.data(),
+			static_cast<std::uint32_t>(response.bytes.size()));
+	pending_action_ = {};
+	return process_once();
+}
+
+ProcessResult DuelSession::submit_effect_yes_no(const bool accepted) {
+	if (!is_active()) {
+		return {false, OCG_DUEL_STATUS_END, "决斗尚未创建", {}};
+	}
+	const DuelResponse response =
+			build_effect_yes_no_response(pending_action_, accepted);
 	if (!response.ok) {
 		return {
 				false,

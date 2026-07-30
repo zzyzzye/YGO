@@ -24,6 +24,19 @@ DuelResponse build_yes_no_response(
 	return {true, "", {response, response + sizeof(response)}};
 }
 
+DuelResponse build_effect_yes_no_response(
+		const PendingAction &pending_action,
+		const bool accepted) {
+	if (pending_action.kind != PendingActionKind::EffectYesNo) {
+		return {false, "当前不是效果发动确认", {}};
+	}
+
+	// SelectEffectYesNo 与普通 YesNo 都读取 int32，但保持独立构造器可防止调用方
+	// 用普通确认快照误消费带效果来源位置的规则决策。
+	const std::uint8_t value = accepted ? 1 : 0;
+	return {true, "", {value, 0, 0, 0}};
+}
+
 DuelResponse build_card_selection_response(
 		const PendingAction &pending_action,
 		const std::size_t option_index) {

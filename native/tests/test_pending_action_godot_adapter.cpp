@@ -61,6 +61,43 @@ void test_yes_no_dictionary_contract() {
 			"非区域选择决策必须发布空区域候选数组");
 }
 
+void test_effect_yes_no_dictionary_contract_and_hidden_identity() {
+	ygo::PendingAction pending;
+	pending.kind = ygo::PendingActionKind::EffectYesNo;
+	pending.player = 0;
+	pending.description = 0x123456789ULL;
+	pending.effect_card_id = 89631139;
+	pending.effect_controller = 0;
+	pending.effect_location = LOCATION_MZONE;
+	pending.effect_sequence = 3;
+	pending.effect_position = POS_FACEUP_ATTACK;
+
+	godot::Dictionary converted =
+			ygo::pending_action_to_dictionary(pending);
+	require(
+			static_cast<godot::String>(converted["kind"])
+					== godot::String("effect_yes_no"),
+			"效果确认必须使用独立 effect_yes_no kind");
+	require(read_int(converted, "effect_card_id") == 89631139,
+			"本地效果来源必须发布卡号");
+	require(read_int(converted, "effect_controller") == 0,
+			"效果来源控制者必须透传");
+	require(read_int(converted, "effect_location") == LOCATION_MZONE,
+			"效果来源区域必须透传");
+	require(read_int(converted, "effect_sequence") == 3,
+			"效果来源序号必须透传");
+	require(read_int(converted, "effect_position") == POS_FACEUP_ATTACK,
+			"效果来源表示形式必须透传");
+
+	pending.effect_controller = 1;
+	pending.effect_position = POS_FACEDOWN_DEFENSE;
+	converted = ygo::pending_action_to_dictionary(pending);
+	require(
+			read_int(converted, "effect_card_id") == 0
+					&& read_int(converted, "description") == 0,
+			"对手里侧效果来源不得通过卡号或 Stringid 描述泄露身份");
+}
+
 void test_card_selection_hides_opponent_facedown_identity() {
 	ygo::PendingAction pending;
 	pending.kind = ygo::PendingActionKind::SelectCard;
@@ -476,6 +513,7 @@ void test_bridge_rejects_negative_selection_before_narrowing() {
 
 void run_contract_tests() {
 	test_yes_no_dictionary_contract();
+	test_effect_yes_no_dictionary_contract_and_hidden_identity();
 	test_card_selection_hides_opponent_facedown_identity();
 	test_position_selection_dictionary_contract();
 	test_place_selection_dictionary_uses_semantic_kind();
@@ -483,6 +521,11 @@ void run_contract_tests() {
 	test_bridge_submits_only_current_place_option_to_real_session();
 	test_chain_dictionary_contract_hides_opponent_facedown_identity();
 	test_bridge_rejects_negative_selection_before_narrowing();
+	godot::Ref<ygo::YgoCoreBridge> bridge;
+	bridge.instantiate();
+	require(
+			bridge->has_method(godot::StringName("submit_effect_yes_no")),
+			"submit_effect_yes_no 必须独立绑定到 Godot");
 	std::fprintf(stdout, "PendingAction Godot 适配器契约测试通过\n");
 }
 

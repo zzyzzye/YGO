@@ -61,6 +61,7 @@ func _connect_board_signals() -> void:
 	board.attack_target_requested.connect(_on_attack_target_requested)
 	board.card_selection_cancel_requested.connect(_on_card_selection_cancel_requested)
 	board.yes_no_requested.connect(_on_yes_no_requested)
+	board.effect_yes_no_requested.connect(_on_effect_yes_no_requested)
 	board.position_requested.connect(_on_position_requested)
 	board.chain_requested.connect(_on_chain_requested)
 	board.chain_pass_requested.connect(_on_chain_pass_requested)
@@ -173,6 +174,26 @@ func _refresh_board(
 			effective_status = "OCGCore 拒绝了响应，请重新选择放置区域"
 		elif !"失败" in status_text:
 			effective_status = "请选择放置区域"
+	elif (
+		str(pending.get("kind", "none")) == "effect_yes_no"
+		and int(pending.get("player", -1)) == 0
+	):
+		if preserve_decision_generation:
+			effective_status = "OCGCore 拒绝了响应，请重新选择是否发动效果"
+		elif !"失败" in status_text:
+			effective_status = "请选择是否发动卡片效果"
+	var effect_card_name := ""
+	if (
+		!game_over
+		and str(pending.get("kind", "none")) == "effect_yes_no"
+		and int(pending.get("effect_card_id", 0)) > 0
+	):
+		var effect_card: Dictionary = bridge.call(
+			"get_card",
+			int(pending.effect_card_id)
+		)
+		if bool(effect_card.get("ok", false)):
+			effect_card_name = str(effect_card.get("cn_name", ""))
 	var snapshot := {
 		"player_hand": player_state.get("hand_cards", []),
 		"opponent_hand_count": int(opponent_state.hand),
@@ -193,7 +214,7 @@ func _refresh_board(
 		"local_player_turn": !game_over
 			and pending.get("kind", "none") in [
 				"idle", "battle", "yes_no", "select_card", "select_position",
-				"select_chain", "select_place",
+				"select_chain", "select_place", "effect_yes_no",
 			]
 			and int(pending.get("player", -1)) == 0,
 		"phase_kind": str(pending.get("kind", "none")),
@@ -201,6 +222,12 @@ func _refresh_board(
 		# DuelBoard 只渲染和转发意图，任何一层都不得提前改写规则状态。
 		"decision_kind": str(pending.get("kind", "none")),
 		"decision_description": int(pending.get("description", 0)),
+		"effect_card_id": int(pending.get("effect_card_id", 0)),
+		"effect_card_name": effect_card_name,
+		"effect_controller": int(pending.get("effect_controller", -1)),
+		"effect_location": int(pending.get("effect_location", 0)),
+		"effect_sequence": int(pending.get("effect_sequence", -1)),
+		"effect_position": int(pending.get("effect_position", 0)),
 		"selection_cancelable": bool(pending.get("cancelable", false)),
 		"selection_min": int(pending.get("min_select", 0)),
 		"selection_max": int(pending.get("max_select", 0)),
@@ -377,6 +404,40 @@ func _on_yes_no_requested(accepted: bool) -> void:
 		return
 	_clear_attack_target_preview()
 	_submit_yes_no_response(accepted, "规则确认已提交")
+
+
+func _on_effect_yes_no_requested(
+	accepted: bool,
+	decision_generation: int
+) -> void:
+	if (
+		_submission_in_progress
+		or decision_generation != board._rule_decision_generation
+		or str(_current_pending_action.get("kind", "none")) != "effect_yes_no"
+		or int(_current_pending_action.get("player", -1)) != 0
+	):
+		return
+	_clear_attack_target_preview()
+	_clear_attack_target_context()
+	_submission_in_progress = true
+	var response: Dictionary = bridge.call(
+		"submit_effect_yes_no",
+		accepted
+	)
+	_submission_in_progress = false
+	if !bool(response.get("ok", false)):
+		board.show_status(
+			"效果确认提交失败：" + str(response.get("message", "未知错误"))
+		)
+		return
+	if bool(response.get("response_rejected", false)):
+		_refresh_board(
+			"OCGCore 拒绝了响应，请重新选择是否发动效果",
+			response.get("pending_action", {}),
+			true
+		)
+		return
+	_refresh_board("效果确认已提交，场面已由 OCGCore 更新")
 
 
 func _on_position_requested(

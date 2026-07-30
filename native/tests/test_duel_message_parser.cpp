@@ -215,6 +215,89 @@ void test_yes_no_rejects_trailing_bytes_without_publishing_description() {
 			== "是/否选择消息含有尾随字节，无法安全解析");
 }
 
+void test_effect_yes_no_exposes_source_location_and_description() {
+	std::vector<std::uint8_t> effect{MSG_SELECT_EFFECTYN, 0};
+	append_little_endian<std::uint32_t>(effect, 89631139);
+	effect.push_back(0);
+	effect.push_back(LOCATION_MZONE);
+	append_little_endian<std::uint32_t>(effect, 3);
+	append_little_endian<std::uint32_t>(effect, POS_FACEUP_ATTACK);
+	append_little_endian<std::uint64_t>(
+			effect,
+			0x1122334455667788ULL);
+
+	const std::vector<std::uint8_t> stream = framed(effect);
+	const ygo::PendingAction pending =
+			ygo::parse_pending_action(stream.data(), stream.size());
+	assert(pending.kind == ygo::PendingActionKind::EffectYesNo);
+	assert(pending.player == 0);
+	assert(pending.message_type == MSG_SELECT_EFFECTYN);
+	assert(pending.effect_card_id == 89631139);
+	assert(pending.effect_controller == 0);
+	assert(pending.effect_location == LOCATION_MZONE);
+	assert(pending.effect_sequence == 3);
+	assert(pending.effect_position == POS_FACEUP_ATTACK);
+	assert(pending.description == 0x1122334455667788ULL);
+}
+
+void test_effect_yes_no_rejects_malformed_or_ambiguous_location() {
+	const auto make_effect = [](
+			std::uint8_t player,
+			std::uint8_t controller,
+			std::uint8_t location) {
+		std::vector<std::uint8_t> message{MSG_SELECT_EFFECTYN, player};
+		append_little_endian<std::uint32_t>(message, 89631139);
+		message.push_back(controller);
+		message.push_back(location);
+		append_little_endian<std::uint32_t>(message, 0);
+		append_little_endian<std::uint32_t>(message, POS_FACEUP_ATTACK);
+		append_little_endian<std::uint64_t>(message, 1);
+		return message;
+	};
+	const auto require_malformed = [&make_effect](
+			std::uint8_t player,
+			std::uint8_t controller,
+			std::uint8_t location) {
+		const std::vector<std::uint8_t> stream =
+				framed(make_effect(player, controller, location));
+		const ygo::PendingAction pending =
+				ygo::parse_pending_action(stream.data(), stream.size());
+		assert(pending.kind == ygo::PendingActionKind::Malformed);
+		assert(pending.effect_card_id == 0);
+	};
+
+	const std::vector<std::uint8_t> truncated =
+			framed({MSG_SELECT_EFFECTYN, 0});
+	const ygo::PendingAction truncated_pending = ygo::parse_pending_action(
+			truncated.data(), truncated.size());
+	assert(truncated_pending.kind == ygo::PendingActionKind::Malformed);
+
+	// 每个非法字段必须单独触发失败，避免某一项校验被删除后仍由其他错误
+	// “代替失败”。location 为零或组合位都不能映射为唯一语义区域。
+	require_malformed(2, 0, LOCATION_MZONE);
+	require_malformed(0, 2, LOCATION_MZONE);
+	require_malformed(0, 0, 0);
+	require_malformed(0, 0, LOCATION_MZONE | LOCATION_SZONE);
+
+	// 玩家 1 / 控制者 1 是合法边界值，必须能完整解析，防止门禁误收紧。
+	const std::vector<std::uint8_t> player_one_stream =
+			framed(make_effect(1, 1, LOCATION_SZONE));
+	const ygo::PendingAction player_one = ygo::parse_pending_action(
+			player_one_stream.data(), player_one_stream.size());
+	assert(player_one.kind == ygo::PendingActionKind::EffectYesNo);
+	assert(player_one.player == 1);
+	assert(player_one.effect_controller == 1);
+	assert(player_one.effect_location == LOCATION_SZONE);
+
+	std::vector<std::uint8_t> trailing = make_effect(0, 0, LOCATION_MZONE);
+	trailing.push_back(0xff);
+	const std::vector<std::uint8_t> trailing_stream = framed(trailing);
+	const ygo::PendingAction trailing_pending = ygo::parse_pending_action(
+			trailing_stream.data(), trailing_stream.size());
+	assert(trailing_pending.kind == ygo::PendingActionKind::Malformed);
+	assert(trailing_pending.effect_card_id == 0);
+}
+
 void test_select_position_exposes_only_core_candidates() {
 	std::vector<std::uint8_t> select{MSG_SELECT_POSITION, 0};
 	append_little_endian<std::uint32_t>(select, 89631139);
@@ -735,6 +818,8 @@ int main() {
 	test_yes_no_message_exposes_player_and_description();
 	test_yes_no_rejects_invalid_player_and_truncated_description();
 	test_yes_no_rejects_trailing_bytes_without_publishing_description();
+	test_effect_yes_no_exposes_source_location_and_description();
+	test_effect_yes_no_rejects_malformed_or_ambiguous_location();
 	test_select_position_exposes_only_core_candidates();
 	test_select_position_rejects_invalid_or_malformed_frames();
 	test_select_card_exposes_single_card_candidates();

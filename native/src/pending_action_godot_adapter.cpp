@@ -52,6 +52,8 @@ const char *pending_action_kind_name(const PendingActionKind kind) {
 		return "battle";
 	case PendingActionKind::YesNo:
 		return "yes_no";
+	case PendingActionKind::EffectYesNo:
+		return "effect_yes_no";
 	case PendingActionKind::SelectCard:
 		return "select_card";
 	case PendingActionKind::SelectPosition:
@@ -129,9 +131,24 @@ godot::Dictionary pending_action_to_dictionary(const PendingAction &pending) {
 	}
 	response["place_options"] = place_options;
 
-	// 选择元数据始终存在，使 Godot 对非选择决策也能用相同 get/default
-	// 契约读取；description 保留 OCGCore 的 64 位描述编号，不在桥接层解释。
-	response["description"] = static_cast<std::int64_t>(pending.description);
+	// OCGCore 脚本常用 aux.Stringid(card_id, effect_id) 生成 description，
+	// 其高位可逆推出卡号。因此对手里侧效果来源必须同时隐藏卡号和描述；
+	// 字段仍保持存在并归零，让 Godot 使用稳定契约和通用文案。
+	const bool effect_source_visible = pending.kind != PendingActionKind::EffectYesNo
+			|| pending.effect_controller == 0
+			|| (pending.effect_position & POS_FACEUP) != 0;
+	response["description"] = static_cast<std::int64_t>(
+			effect_source_visible ? pending.description : 0);
+	response["effect_card_id"] = static_cast<std::int64_t>(
+			effect_source_visible
+			? pending.effect_card_id
+			: 0);
+	response["effect_controller"] = pending.effect_controller;
+	response["effect_location"] = pending.effect_location;
+	response["effect_sequence"] =
+			static_cast<std::int64_t>(pending.effect_sequence);
+	response["effect_position"] =
+			static_cast<std::int64_t>(pending.effect_position);
 	response["cancelable"] = pending.cancelable;
 	response["min_select"] = static_cast<std::int64_t>(pending.min_select);
 	response["max_select"] = static_cast<std::int64_t>(pending.max_select);

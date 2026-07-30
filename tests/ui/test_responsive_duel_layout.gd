@@ -19,6 +19,7 @@ const EXPECTED_SYSTEM_BUTTON_COUNT := 3
 const SCENARIO_DIRECT_ATTACK := "直击 LP 与怪兽预览"
 const SCENARIO_FIVE_TARGETS := "五个合法怪兽目标"
 const SCENARIO_GENERIC_YES_NO := "通用 YesNo 确认"
+const SCENARIO_EFFECT_YES_NO := "卡片效果发动确认"
 const SCENARIO_CANCELABLE_TARGETS := "可取消目标选择"
 const SCENARIO_SELECT_POSITION := "四种表示形式"
 const SCENARIO_SELECT_CHAIN := "手牌连锁多效果"
@@ -51,7 +52,7 @@ func _run() -> void:
 		_assert_stretch_contract(physical_size)
 		if _failed:
 			return
-		# 同一场景依次消费七份规则快照，既覆盖满载布局与空卡位高亮，也验证新快照能清除
+		# 同一场景依次消费八份规则快照，既覆盖满载布局与空卡位高亮，也验证新快照能清除
 		# 上一状态的高亮和浮层。物理窗口只在外层切换，保持真实 Stretch 路径。
 		for scenario in _responsive_scenarios():
 			board.render_snapshot(scenario.snapshot)
@@ -138,6 +139,15 @@ func _responsive_scenarios() -> Array[Dictionary]:
 	generic_yes_no["decision_kind"] = "yes_no"
 	generic_yes_no["decision_description"] = 99
 
+	var effect_yes_no := _maximum_snapshot()
+	effect_yes_no["decision_kind"] = "effect_yes_no"
+	effect_yes_no["effect_card_name"] = "超长名称响应式测试效果怪兽"
+	effect_yes_no["effect_card_id"] = 89631139
+	effect_yes_no["effect_controller"] = 0
+	effect_yes_no["effect_location"] = 4
+	effect_yes_no["effect_sequence"] = 0
+	effect_yes_no["effect_position"] = 1
+
 	var cancelable_targets := _maximum_snapshot()
 	cancelable_targets["decision_kind"] = "select_card"
 	cancelable_targets["attack_target_context_supported"] = true
@@ -194,6 +204,7 @@ func _responsive_scenarios() -> Array[Dictionary]:
 		{"name": SCENARIO_DIRECT_ATTACK, "snapshot": direct_attack},
 		{"name": SCENARIO_FIVE_TARGETS, "snapshot": five_targets},
 		{"name": SCENARIO_GENERIC_YES_NO, "snapshot": generic_yes_no},
+		{"name": SCENARIO_EFFECT_YES_NO, "snapshot": effect_yes_no},
 		{"name": SCENARIO_CANCELABLE_TARGETS, "snapshot": cancelable_targets},
 		{"name": SCENARIO_SELECT_POSITION, "snapshot": select_position},
 		{"name": SCENARIO_SELECT_CHAIN, "snapshot": select_chain},
@@ -855,6 +866,27 @@ func _assert_scenario_layout(
 			physical_size,
 			scenario_name,
 			"确认层"
+		)
+	elif scenario_name == SCENARIO_EFFECT_YES_NO:
+		var effect_button_texts: Array[String] = []
+		for child in board.confirmation_buttons.get_children():
+			if child is Button:
+				effect_button_texts.append(str(child.text))
+		if (
+			!board.confirmation_overlay.is_visible_in_tree()
+			or effect_button_texts != ["发动", "不发动"]
+			or board.confirmation_label.text
+					!= "是否发动「超长名称响应式测试效果怪兽」的效果？"
+		):
+			_fail("EffectYesNo 必须显示完整情境确认层：窗口 " + str(physical_size))
+			return
+		_assert_optional_overlay_layout(
+			board.confirmation_overlay,
+			logical_rect,
+			safe_rect,
+			physical_size,
+			scenario_name,
+			"效果确认层"
 		)
 	elif scenario_name == SCENARIO_CANCELABLE_TARGETS:
 		if !_assert_five_target_highlights(

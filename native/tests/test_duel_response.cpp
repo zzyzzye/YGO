@@ -35,6 +35,27 @@ void test_yes_no_response_encodes_boolean_as_little_endian_int32() {
 	assert(declined.bytes == std::vector<std::uint8_t>({0, 0, 0, 0}));
 }
 
+void test_effect_yes_no_response_is_isolated_and_encodes_int32() {
+	ygo::PendingAction pending;
+	pending.kind = ygo::PendingActionKind::EffectYesNo;
+
+	const ygo::DuelResponse accepted =
+			ygo::build_effect_yes_no_response(pending, true);
+	const ygo::DuelResponse declined =
+			ygo::build_effect_yes_no_response(pending, false);
+	assert(accepted.ok);
+	assert(accepted.bytes == std::vector<std::uint8_t>({1, 0, 0, 0}));
+	assert(declined.ok);
+	assert(declined.bytes == std::vector<std::uint8_t>({0, 0, 0, 0}));
+
+	pending.kind = ygo::PendingActionKind::YesNo;
+	const ygo::DuelResponse wrong_kind =
+			ygo::build_effect_yes_no_response(pending, true);
+	assert(!wrong_kind.ok);
+	assert(wrong_kind.message == "当前不是效果发动确认");
+	assert(wrong_kind.bytes.empty());
+}
+
 void test_position_response_requires_current_discrete_candidate() {
 	ygo::PendingAction pending;
 	pending.kind = ygo::PendingActionKind::YesNo;
@@ -296,6 +317,7 @@ void test_place_response_requires_an_exact_current_place_option() {
 int main() {
 	test_yes_no_response_rejects_wrong_action_kind();
 	test_yes_no_response_encodes_boolean_as_little_endian_int32();
+	test_effect_yes_no_response_is_isolated_and_encodes_int32();
 	test_position_response_requires_current_discrete_candidate();
 	test_position_response_encodes_little_endian_int32();
 	test_card_selection_response_rejects_wrong_kind_and_unknown_candidate();

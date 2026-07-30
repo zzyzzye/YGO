@@ -88,6 +88,9 @@ public:
 	// 是非与卡牌选择只接受当前解析快照中的语义输入。Session 独占协议组包
 	// 和 OCGCore 提交，界面不能绕过候选、类型或取消能力门禁。
 	[[nodiscard]] ProcessResult submit_yes_no(bool accepted);
+	// 效果确认与普通 YesNo 使用相同 0/1 字节表示，但保持独立语义入口，
+	// 防止攻击路线或普通确认误消费带来源位置的 EffectYesNo 快照。
+	[[nodiscard]] ProcessResult submit_effect_yes_no(bool accepted);
 	[[nodiscard]] ProcessResult submit_card_selection(std::size_t option_index);
 	[[nodiscard]] ProcessResult cancel_card_selection();
 	// 连锁选择通过解析快照中的稳定候选索引提交；Session 负责调用 Task 1 的
@@ -180,6 +183,21 @@ struct AutomaticPlaceDecision {
 // 保证固定牌组与种子的回放稳定。函数不写入 OCGCore，也不接受本地玩家快照。
 [[nodiscard]] AutomaticPlaceDecision decide_automatic_place_action(
 		const PendingAction &pending_action);
+
+enum class AutomaticEffectYesNoDecisionKind {
+	Stop,
+	Decline,
+};
+
+struct AutomaticEffectYesNoDecision {
+	AutomaticEffectYesNoDecisionKind kind =
+			AutomaticEffectYesNoDecisionKind::Stop;
+};
+
+// 自动对手对可选效果采用确定性“不发动”策略。本地玩家和其他决策类型必须
+// 停止，调用方只能通过 Session 的 EffectYesNo 语义入口提交。
+[[nodiscard]] AutomaticEffectYesNoDecision
+decide_automatic_effect_yes_no_action(const PendingAction &pending_action);
 
 // 将单机模式推进至本地 OCGCore 玩家编号 0 的下一个决策点。玩家编号 1 的
 // 对手决策采用确定性策略，且仅通过 DuelSession 的语义接口提交；该函数不依赖

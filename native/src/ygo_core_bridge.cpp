@@ -591,6 +591,30 @@ godot::Dictionary YgoCoreBridge::submit_yes_no(const bool accepted) {
 			: process_result_to_dictionary(result);
 }
 
+godot::Dictionary YgoCoreBridge::submit_effect_yes_no(
+		const bool accepted) {
+	if (!session_ || !session_->is_active()) {
+		return process_result_to_dictionary({
+				false, OCG_DUEL_STATUS_END, "决斗尚未创建", {}});
+	}
+	if (session_->winner() >= 0) {
+		return process_result_to_dictionary({
+				false, OCG_DUEL_STATUS_END, "决斗已经结束，不能继续提交动作",
+				session_->pending_action()});
+	}
+	if (session_->pending_action().player != 0) {
+		return process_result_to_dictionary({
+				false, OCG_DUEL_STATUS_AWAITING, "当前不是本地玩家的操作回合",
+				session_->pending_action()});
+	}
+	const ProcessResult result =
+			session_->submit_effect_yes_no(accepted);
+	return result.ok
+			? process_result_to_dictionary(
+					advance_to_local_decision(*session_, result))
+			: process_result_to_dictionary(result);
+}
+
 godot::Dictionary YgoCoreBridge::submit_card_selection(
 		const std::int64_t index) {
 	// Godot int 为有符号 64 位，Session 候选索引为 size_t。必须先拒绝
@@ -881,6 +905,9 @@ void YgoCoreBridge::_bind_methods() {
 	godot::ClassDB::bind_method(
 			godot::D_METHOD("submit_yes_no", "accepted"),
 			&YgoCoreBridge::submit_yes_no);
+	godot::ClassDB::bind_method(
+			godot::D_METHOD("submit_effect_yes_no", "accepted"),
+			&YgoCoreBridge::submit_effect_yes_no);
 	godot::ClassDB::bind_method(
 			godot::D_METHOD("submit_card_selection", "index"),
 			&YgoCoreBridge::submit_card_selection);

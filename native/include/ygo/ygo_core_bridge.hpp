@@ -63,6 +63,7 @@ public:
 	// 是非与卡牌选择只传递稳定语义参数；成功后继续自动推进对手决策，
 	// 返回下一个本地决策快照。负索引在任何无符号窄化前由 Bridge 拒绝。
 	godot::Dictionary submit_yes_no(bool accepted);
+	godot::Dictionary submit_effect_yes_no(bool accepted);
 	godot::Dictionary submit_card_selection(std::int64_t index);
 	godot::Dictionary cancel_card_selection();
 	godot::Dictionary submit_position(std::int64_t position);

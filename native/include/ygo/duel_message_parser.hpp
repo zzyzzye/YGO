@@ -12,6 +12,7 @@ enum class PendingActionKind {
 	Idle,
 	Battle,
 	YesNo,
+	EffectYesNo,
 	SelectCard,
 	SelectPosition,
 	SelectChain,
@@ -134,6 +135,13 @@ struct PendingAction {
 	// MSG_SELECT_YESNO 的 OCGCore 描述编号。其语义由上层文案表解释，0 是
 	// 未携带描述的默认值，不能与任意具体问题混用。
 	std::uint64_t description = 0;
+	// MSG_SELECT_EFFECTYN 额外携带效果来源卡的完整 loc_info。字段只在
+	// EffectYesNo 时有效；Godot 可用它定位可见卡，但不能据此自行推断效果。
+	std::uint32_t effect_card_id = 0;
+	std::uint8_t effect_controller = 0;
+	std::uint8_t effect_location = 0;
+	std::uint32_t effect_sequence = 0;
+	std::uint32_t effect_position = 0;
 	// MSG_SELECT_CARD 的协议选择约束。只有 SelectCard 时这些字段才有意义；
 	// 解析失败不会暴露半成品候选，调用方可据此安全地拒绝响应。
 	bool cancelable = false;

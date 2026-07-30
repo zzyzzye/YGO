@@ -14,6 +14,7 @@ signal attack_target_preview_requested(location: Dictionary)
 signal attack_target_requested(option_index: int)
 signal card_selection_cancel_requested
 signal yes_no_requested(accepted: bool)
+signal effect_yes_no_requested(accepted: bool, decision_generation: int)
 signal position_requested(position: int, decision_generation: int)
 signal chain_requested(index: int, decision_generation: int)
 signal chain_pass_requested(decision_generation: int)
@@ -229,6 +230,8 @@ func _render_rule_decision(snapshot: Dictionary) -> void:
 		return
 	elif kind == "yes_no":
 		_open_yes_no_prompt(int(snapshot.get("decision_description", 0)))
+	elif kind == "effect_yes_no":
+		_open_effect_yes_no_prompt(snapshot)
 	elif kind == "select_position":
 		_open_position_prompt(
 			int(snapshot.get("selection_card_id", 0)),
@@ -439,6 +442,34 @@ func _open_yes_no_prompt(description: int) -> void:
 		button.pressed.connect(_emit_yes_no.bind(bool(option.accepted)))
 		confirmation_buttons.add_child(button)
 	confirmation_overlay.visible = true
+
+
+func _open_effect_yes_no_prompt(snapshot: Dictionary) -> void:
+	_rule_decision_kind = "effect_yes_no"
+	_confirmation_kind = "rule_effect_yes_no"
+	var card_name := str(snapshot.get("effect_card_name", "")).strip_edges()
+	confirmation_label.text = (
+		"是否发动「%s」的效果？" % card_name
+		if !card_name.is_empty()
+		else "是否发动该卡的效果？"
+	)
+	_clear_confirmation_buttons()
+	for option in [
+		{"accepted": true, "text": "发动"},
+		{"accepted": false, "text": "不发动"},
+	]:
+		var button := Button.new()
+		button.text = str(option.text)
+		button.pressed.connect(
+			_emit_effect_yes_no.bind(
+				bool(option.accepted),
+				_rule_decision_generation
+			)
+		)
+		confirmation_buttons.add_child(button)
+	confirmation_overlay.visible = true
+	if str(snapshot.get("status_text", "")).is_empty():
+		show_status("请选择是否发动卡片效果")
 
 
 func _open_position_prompt(card_id: int, options: Array) -> void:
@@ -731,6 +762,17 @@ func _emit_card_selection_cancel() -> void:
 func _emit_yes_no(accepted: bool) -> void:
 	if _rule_decision_kind == "yes_no":
 		yes_no_requested.emit(accepted)
+
+
+func _emit_effect_yes_no(
+	accepted: bool,
+	decision_generation: int
+) -> void:
+	if (
+		_rule_decision_kind == "effect_yes_no"
+		and decision_generation == _rule_decision_generation
+	):
+		effect_yes_no_requested.emit(accepted, decision_generation)
 
 
 func _preview_card(card_data: Dictionary) -> void:
