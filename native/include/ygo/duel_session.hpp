@@ -164,6 +164,23 @@ struct AutomaticChainDecision {
 [[nodiscard]] AutomaticChainDecision decide_automatic_chain_action(
 		const PendingAction &pending_action);
 
+// 自动对手的单区域策略只返回已经由解析器验证的候选值。Stop 表示快照不属于
+// 玩家 2、候选为空或决策类型不匹配，调用方不得用零值拼装默认响应。
+enum class AutomaticPlaceDecisionKind {
+	Stop,
+	Submit,
+};
+
+struct AutomaticPlaceDecision {
+	AutomaticPlaceDecisionKind kind = AutomaticPlaceDecisionKind::Stop;
+	PlaceOption option;
+};
+
+// 单机原型暂不评估区域价值；玩家 2 遇到合法 SelectPlace 时确定性选择首项，
+// 保证固定牌组与种子的回放稳定。函数不写入 OCGCore，也不接受本地玩家快照。
+[[nodiscard]] AutomaticPlaceDecision decide_automatic_place_action(
+		const PendingAction &pending_action);
+
 // 将单机模式推进至本地 OCGCore 玩家编号 0 的下一个决策点。玩家编号 1 的
 // 对手决策采用确定性策略，且仅通过 DuelSession 的语义接口提交；该函数不依赖
 // Godot Variant，因此 Bridge 与原生回归测试共享完全相同的状态机实现。

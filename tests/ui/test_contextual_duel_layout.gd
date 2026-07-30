@@ -986,6 +986,9 @@ func _run() -> void:
 	}
 	board.render_snapshot(place_snapshot)
 	var place_generation: int = board._rule_decision_generation
+	if board.status_label.text != "请选择放置区域":
+		_fail("SelectPlace 首次等待必须显示“请选择放置区域”")
+		return
 	var place_candidate_zones: Array[ZoneView] = [
 		board.player_monster_zones[0],
 		board.player_spell_zones[1],
@@ -1096,6 +1099,31 @@ func _run() -> void:
 			if malformed_candidate_zone.target_highlight.visible:
 				_fail("越界 sequence 或未知 location 必须原子隐藏全部候选")
 				return
+
+		# 无法映射时 OCGCore 没有可点击响应入口，重开与退出必须作为本地系统
+		# 脱困路径继续可用；取消确认不能消费或改写当前规则等待状态。
+		await _viewport_click(board.restart_button)
+		if (
+			!board.confirmation_overlay.visible
+			or board._rule_decision_kind != "select_place_unmapped"
+		):
+			_fail("区域候选无法映射时必须仍能打开重开确认")
+			return
+		await _viewport_click(board.confirmation_buttons.get_child(1))
+		if (
+			board.confirmation_overlay.visible
+			or board._rule_decision_kind != "select_place_unmapped"
+		):
+			_fail("取消重开确认不得消费无法映射的区域决策")
+			return
+		await _viewport_click(board.exit_button)
+		if (
+			!board.confirmation_overlay.visible
+			or board._rule_decision_kind != "select_place_unmapped"
+		):
+			_fail("区域候选无法映射时必须仍能打开退出确认")
+			return
+		await _viewport_click(board.confirmation_buttons.get_child(1))
 
 	var empty_place_snapshot := place_snapshot.duplicate(true)
 	empty_place_snapshot.place_options = []

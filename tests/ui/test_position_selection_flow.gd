@@ -152,7 +152,7 @@ func _run() -> void:
 	if (
 		!board.confirmation_overlay.visible
 		or fake.calls.size() != 2
-		or "重新选择" not in board.status_label.text
+		or board.status_label.text != "OCGCore 拒绝了响应，请重新选择"
 	):
 		_fail("MSG_RETRY 后必须恢复同一表示形式入口和中文提示")
 		return

@@ -350,10 +350,10 @@ YgoCoreBridge，并通过 `SubViewport.push_input()` 进入真实 GUI 命中链�
 直接发射 `place_requested` 或调用私有恢复函数来伪造全链路。
 
 安全 Bridge 不会主动生成伪造候选或旧代次输入，合法 OCGCore PlaceOption 也不会
-自然触发 Retry，因此这些门禁采用分层证明：Task 2 的真实 OCGCore 测试验证
-MSG_RETRY 完整恢复 SelectPlace 快照；Task 4 的 Main FakeBridge 测试验证
-`response_rejected` 同代重建、伪造候选和 old generation 门禁。Task 5 完整套件
-必须同时运行这些已有测试，不能在生产 E2E 中复制或绕过边界。
+自然触发 Retry，因此这些门禁采用分层证明：ProcessResult 转换测试验证
+`response_rejected` 与恢复快照完整发布；Task 4 的 Main FakeBridge 测试验证
+同代重建、伪造候选和 old generation 门禁。Task 5 完整套件必须同时运行这些
+已有测试，不能在生产 E2E 中复制或绕过边界。
 
 响应式测试增加同时包含怪兽区、魔陷区候选的场景，并在
 1920×1080、3840×2160、1920×1200 断言高亮矩形位于 SafeArea 且不遮挡手牌、
@@ -476,8 +476,9 @@ Expected: 重开/退出确认受阻或状态文字不符，测试 FAIL。
 
 - [ ] **Step 7: 删除失真的 Retry 测试并收紧公开门禁**
 
-移除 `native/tests/test_duel_session.cpp` 中的 `private public` 和人工写入私有
-快照的 SelectPlace Retry 场景；保留所有通过公开 API 或真实核心产生的证据。
+移除 `native/tests/test_duel_session.cpp` 中依赖 `private public` 人工写入私有
+快照的 SelectPlace Retry 场景；其他既有测试若仍因独立决策类型使用该测试夹具，
+不再被当作 SelectPlace Retry 证据。保留所有通过公开 API 或真实核心产生的证据。
 将 `PlaceSubmissionGateResult` 与 `validate_place_submission_gate` 移到
 `native/src/ygo_core_bridge.cpp` 的匿名命名空间，并调整现有 Bridge 测试只验证
 公开语义行为。

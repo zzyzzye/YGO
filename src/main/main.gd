@@ -165,6 +165,14 @@ func _refresh_board(
 			if winner in [0, 1]
 			else "对局结束：平局"
 		)
+	elif (
+		str(pending.get("kind", "none")) == "select_place"
+		and int(pending.get("player", -1)) == 0
+	):
+		if preserve_decision_generation:
+			effective_status = "OCGCore 拒绝了响应，请重新选择放置区域"
+		elif !"失败" in status_text:
+			effective_status = "请选择放置区域"
 	var snapshot := {
 		"player_hand": player_state.get("hand_cards", []),
 		"opponent_hand_count": int(opponent_state.hand),

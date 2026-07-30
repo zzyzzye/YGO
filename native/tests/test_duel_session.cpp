@@ -178,6 +178,39 @@ void test_automatic_chain_strategy_selects_local_stop_pass_or_first_option() {
 	assert(forced.option_index == 17);
 }
 
+void test_automatic_place_strategy_only_submits_opponent_first_option() {
+	ygo::PendingAction opponent_place;
+	opponent_place.kind = ygo::PendingActionKind::SelectPlace;
+	opponent_place.player = 1;
+	opponent_place.place_options = {
+		{1, LOCATION_MZONE, 4},
+		{1, LOCATION_SZONE, 2},
+	};
+
+	const ygo::AutomaticPlaceDecision opponent_decision =
+			ygo::decide_automatic_place_action(opponent_place);
+	assert(opponent_decision.kind
+			== ygo::AutomaticPlaceDecisionKind::Submit);
+	assert(opponent_decision.option.player == 1);
+	assert(opponent_decision.option.location == LOCATION_MZONE);
+	assert(opponent_decision.option.sequence == 4);
+
+	ygo::PendingAction local_place = opponent_place;
+	local_place.player = 0;
+	assert(ygo::decide_automatic_place_action(local_place).kind
+			== ygo::AutomaticPlaceDecisionKind::Stop);
+
+	ygo::PendingAction empty_place = opponent_place;
+	empty_place.place_options.clear();
+	assert(ygo::decide_automatic_place_action(empty_place).kind
+			== ygo::AutomaticPlaceDecisionKind::Stop);
+
+	ygo::PendingAction wrong_kind = opponent_place;
+	wrong_kind.kind = ygo::PendingActionKind::Idle;
+	assert(ygo::decide_automatic_place_action(wrong_kind).kind
+			== ygo::AutomaticPlaceDecisionKind::Stop);
+}
+
 void test_fixed_real_decks_offer_local_chain_and_continue_after_response() {
 	const std::filesystem::path root = repository_root();
 	const auto loaded = ygo::CardDatabase::load_json_intersection(
@@ -822,6 +855,72 @@ void test_fixed_real_decks_advance_to_second_players_idle_action() {
 	assert(process.pending_action.can_end_turn);
 	assert(process.pending_action.can_enter_battle);
 
+	const std::array<int, 6> first_trace{
+			MSG_SELECT_IDLECMD,
+			0,
+			process.pending_action.message_type,
+			process.pending_action.player,
+			static_cast<int>(session.query_count(1, LOCATION_DECK)),
+			static_cast<int>(session.query_count(1, LOCATION_HAND)),
+	};
+
+	// 直接从玩家 2 的真实 Idle 候选发起通常召唤，让 OCGCore 产生对手
+	// SelectPlace。随后只调用生产自动推进器，验证它确实经 submit_place 消费
+	// 首项语义候选；若推进分支被删除，结果会原样停在玩家 2 的区域选择。
+	const auto opponent_summon = std::find_if(
+			process.pending_action.idle_actions.begin(),
+			process.pending_action.idle_actions.end(),
+			[](const ygo::IdleAction &action) {
+				return action.kind == ygo::IdleActionKind::NormalSummon;
+			});
+	assert(opponent_summon != process.pending_action.idle_actions.end());
+	process = session.submit_idle_action(
+			opponent_summon->kind,
+			opponent_summon->index);
+	for (int step_index = 0;
+			step_index < 100
+			&& process.pending_action.kind == ygo::PendingActionKind::None;
+			++step_index) {
+		process = session.step();
+	}
+	assert(process.pending_action.kind == ygo::PendingActionKind::SelectPlace);
+	assert(process.pending_action.player == 1);
+	assert(!process.pending_action.place_options.empty());
+	const ygo::PlaceOption automatic_place =
+			process.pending_action.place_options.front();
+	process = ygo::advance_to_local_decision(session, process);
+	assert(process.ok);
+	assert(!(process.pending_action.kind == ygo::PendingActionKind::SelectPlace
+			&& process.pending_action.player == 1));
+	const std::vector<ygo::DuelCardSnapshot> opponent_monsters =
+			session.query_cards(1, LOCATION_MZONE);
+	assert(std::any_of(
+			opponent_monsters.begin(),
+			opponent_monsters.end(),
+			[automatic_place](const ygo::DuelCardSnapshot &card) {
+				return card.sequence == automatic_place.sequence;
+			}));
+
+	// 自动推进会在区域响应结算后结束对手回合并返回本地决策；后续战斗阶段
+	// 验证需要重新推进到玩家 2，因此本段不再复用已经结束的对手 Idle 快照。
+	for (int step_index = 0;
+			step_index < 100
+			&& !(process.pending_action.kind == ygo::PendingActionKind::Idle
+					&& process.pending_action.player == 1)
+			&& process.status != OCG_DUEL_STATUS_END;
+			++step_index) {
+		if (process.pending_action.kind == ygo::PendingActionKind::Idle
+				&& process.pending_action.player == 0) {
+			process = session.submit_end_turn();
+		} else if (process.pending_action.kind == ygo::PendingActionKind::None) {
+			process = session.step();
+		} else {
+			break;
+		}
+	}
+	assert(process.pending_action.kind == ygo::PendingActionKind::Idle);
+	assert(process.pending_action.player == 1);
+
 	process = session.submit_enter_battle();
 	for (int step_index = 0;
 			step_index < 100
@@ -847,14 +946,6 @@ void test_fixed_real_decks_advance_to_second_players_idle_action() {
 	assert(process.pending_action.kind == ygo::PendingActionKind::Idle);
 	assert(process.pending_action.player == 1);
 
-	const std::array<int, 6> first_trace{
-			MSG_SELECT_IDLECMD,
-			0,
-			process.pending_action.message_type,
-			process.pending_action.player,
-			static_cast<int>(session.query_count(1, LOCATION_DECK)),
-			static_cast<int>(session.query_count(1, LOCATION_HAND)),
-	};
 	session.destroy();
 
 	// 使用完全相同的牌组与种子重放一次，比较关键决策序列和最终区域计数，
@@ -1058,47 +1149,6 @@ void test_fixed_real_decks_advance_to_second_players_idle_action() {
 	assert(invalid_position.pending_action.position_options
 			== submitted_position.position_options);
 
-	// 效果产生的区域选择同样必须保留为 SelectPlace。这里故意把快照提交给
-	// 真实 Idle Processor，使核心返回 MSG_RETRY；恢复后的区域候选不能丢失，
-	// 更不能被会话改写为 Unsupported。
-	ygo::PendingAction submitted_place_retry;
-	submitted_place_retry.kind = ygo::PendingActionKind::SelectPlace;
-	submitted_place_retry.player = 0;
-	submitted_place_retry.message_type = MSG_SELECT_PLACE;
-	submitted_place_retry.message = "请选择效果放置区域";
-	submitted_place_retry.place_options = {
-		{0, LOCATION_MZONE, 3},
-		{1, LOCATION_SZONE, 1},
-	};
-	replay.last_submitted_action_ = {};
-	replay.pending_action_ = submitted_place_retry;
-	const ygo::ProcessResult place_retry =
-			replay.submit_place(0, LOCATION_MZONE, 3);
-	assert(place_retry.ok);
-	assert(place_retry.response_rejected);
-	assert(place_retry.pending_action.kind
-			== ygo::PendingActionKind::SelectPlace);
-	assert(place_retry.pending_action.kind
-			!= ygo::PendingActionKind::Unsupported);
-	assert(place_retry.pending_action.player == submitted_place_retry.player);
-	assert(place_retry.pending_action.message_type
-			== submitted_place_retry.message_type);
-	assert(place_retry.pending_action.message == submitted_place_retry.message);
-	assert(place_retry.pending_action.place_options.size() == 2);
-	assert(place_retry.pending_action.place_options[0].player == 0);
-	assert(place_retry.pending_action.place_options[0].location == LOCATION_MZONE);
-	assert(place_retry.pending_action.place_options[0].sequence == 3);
-	assert(place_retry.pending_action.place_options[1].player == 1);
-	assert(place_retry.pending_action.place_options[1].location == LOCATION_SZONE);
-	assert(place_retry.pending_action.place_options[1].sequence == 1);
-	const ygo::ProcessResult invalid_place =
-			replay.submit_place(0, LOCATION_MZONE, 2);
-	assert(!invalid_place.ok);
-	assert(!invalid_place.response_rejected);
-	assert(invalid_place.message == "区域候选不属于当前 OCGCore 候选列表");
-	assert(invalid_place.pending_action.place_options.size() == 2);
-	assert(invalid_place.pending_action.place_options[0].sequence == 3);
-	assert(invalid_place.pending_action.place_options[1].sequence == 1);
 }
 
 void test_full_local_assets_when_requested() {
@@ -1134,6 +1184,7 @@ int main() {
 	test_inactive_session_rejects_end_turn();
 	test_raw_compatibility_response_advances_pending_decision();
 	test_automatic_chain_strategy_selects_local_stop_pass_or_first_option();
+	test_automatic_place_strategy_only_submits_opponent_first_option();
 	test_fixed_real_decks_offer_local_chain_and_continue_after_response();
 	test_chain_submission_validates_snapshot_and_recovers_after_retry();
 	test_real_direct_attack_is_accepted();

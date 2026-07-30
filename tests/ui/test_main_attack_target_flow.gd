@@ -185,9 +185,9 @@ func _run() -> void:
 		fake.place_submissions != [[0, 4, 0], [0, 8, 2]]
 		or board._rule_decision_generation != failure_generation
 		or !board.player_spell_zones[2].target_highlight.visible
-		or "重新选择" not in board.status_label.text
+		or board.status_label.text != "OCGCore 拒绝了响应，请重新选择放置区域"
 	):
-		_fail("区域 Retry 必须锁住重入、保留代次并重建候选")
+		_fail("区域 Retry 必须锁住重入、保留代次、重建候选并显示重新选区提示")
 		return
 
 	# 正常响应进入下一份 SelectPlace，必须推进代次；同一调用栈保留的旧代次

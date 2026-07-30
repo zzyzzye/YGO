@@ -20,6 +20,30 @@ namespace ygo {
 
 namespace {
 
+// 区域门禁只服务 Bridge 的公开 submit_place 入口，不暴露可被其他调用方误用的
+// 第二套提交 API。精确候选匹配仍由 DuelSession::submit_place 完成。
+struct PlaceSubmissionGateResult {
+	bool ok = false;
+	int status = -1;
+	std::string message;
+};
+
+[[nodiscard]] PlaceSubmissionGateResult validate_place_submission_gate(
+		const bool session_active,
+		const int winner,
+		const PendingAction &pending_action) {
+	if (!session_active) {
+		return {false, OCG_DUEL_STATUS_END, "决斗尚未创建"};
+	}
+	if (winner >= 0) {
+		return {false, OCG_DUEL_STATUS_END, "决斗已经结束，不能继续提交动作"};
+	}
+	if (pending_action.player != 0) {
+		return {false, OCG_DUEL_STATUS_AWAITING, "当前不是本地玩家的操作回合"};
+	}
+	return {true, OCG_DUEL_STATUS_AWAITING, ""};
+}
+
 godot::Dictionary card_to_dictionary(
 		const CardDatabase &database,
 		const DuelCardSnapshot &snapshot) {
@@ -70,22 +94,6 @@ godot::Array hidden_cards_to_array(
 }
 
 } // namespace
-
-PlaceSubmissionGateResult validate_place_submission_gate(
-		const bool session_active,
-		const int winner,
-		const PendingAction &pending_action) {
-	if (!session_active) {
-		return {false, OCG_DUEL_STATUS_END, "决斗尚未创建"};
-	}
-	if (winner >= 0) {
-		return {false, OCG_DUEL_STATUS_END, "决斗已经结束，不能继续提交动作"};
-	}
-	if (pending_action.player != 0) {
-		return {false, OCG_DUEL_STATUS_AWAITING, "当前不是本地玩家的操作回合"};
-	}
-	return {true, OCG_DUEL_STATUS_AWAITING, ""};
-}
 
 YgoCoreBridge::YgoCoreBridge() {
 }

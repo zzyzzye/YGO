@@ -303,6 +303,19 @@ AutomaticChainDecision decide_automatic_chain_action(
 	};
 }
 
+AutomaticPlaceDecision decide_automatic_place_action(
+		const PendingAction &pending_action) {
+	if (pending_action.kind != PendingActionKind::SelectPlace
+			|| pending_action.player != 1
+			|| pending_action.place_options.empty()) {
+		return {};
+	}
+	return {
+		AutomaticPlaceDecisionKind::Submit,
+		pending_action.place_options.front(),
+	};
+}
+
 ProcessResult advance_to_local_decision(DuelSession &session, ProcessResult result) {
 	const auto is_auto_action_pending = [](const ProcessResult &current) {
 		return current.ok
@@ -331,6 +344,18 @@ ProcessResult advance_to_local_decision(DuelSession &session, ProcessResult resu
 			}
 			if (decision.kind == AutomaticChainDecisionKind::Submit) {
 				result = session.submit_chain(decision.option_index);
+				continue;
+			}
+			break;
+		}
+		if (result.pending_action.kind == PendingActionKind::SelectPlace) {
+			const AutomaticPlaceDecision decision =
+					decide_automatic_place_action(result.pending_action);
+			if (decision.kind == AutomaticPlaceDecisionKind::Submit) {
+				result = session.submit_place(
+						decision.option.player,
+						decision.option.location,
+						decision.option.sequence);
 				continue;
 			}
 			break;

@@ -339,43 +339,6 @@ void test_bridge_submits_only_current_place_option_to_real_session() {
 	bridge->destroy_duel();
 }
 
-void test_place_submission_gate_rejects_nonlocal_and_finished_pending() {
-	// 单机 Bridge 会自动处理对手决策，固定牌组也不能可靠地快速进入终局。
-	// 纯值门禁以 PendingAction 快照为唯一决策输入，故可直接验证这些安全分支，
-	// 不必篡改任何 Session/Bridge 私有状态或构造伪 OCGCore 句柄。
-	ygo::PendingAction nonlocal_pending;
-	nonlocal_pending.kind = ygo::PendingActionKind::SelectPlace;
-	nonlocal_pending.player = 1;
-	nonlocal_pending.place_options = {{0, LOCATION_MZONE, 3}};
-	const ygo::PlaceSubmissionGateResult nonlocal =
-			ygo::validate_place_submission_gate(true, -1, nonlocal_pending);
-	require(!nonlocal.ok, "非本地待决玩家不得提交区域");
-	require(
-			nonlocal.message == "当前不是本地玩家的操作回合",
-			"非本地待决玩家必须返回中文门禁错误");
-	require(
-			nonlocal_pending.kind == ygo::PendingActionKind::SelectPlace
-					&& nonlocal_pending.player == 1
-					&& nonlocal_pending.place_options.size() == 1,
-			"纯值非本地门禁不得改写输入 pending");
-
-	ygo::PendingAction finished_pending;
-	finished_pending.kind = ygo::PendingActionKind::SelectPlace;
-	finished_pending.player = 0;
-	finished_pending.place_options = {{0, LOCATION_MZONE, 3}};
-	const ygo::PlaceSubmissionGateResult finished =
-			ygo::validate_place_submission_gate(true, 0, finished_pending);
-	require(!finished.ok, "终局决斗不得提交区域");
-	require(
-			finished.message == "决斗已经结束，不能继续提交动作",
-			"终局提交必须返回中文门禁错误");
-	require(
-			finished_pending.kind == ygo::PendingActionKind::SelectPlace
-					&& finished_pending.player == 0
-					&& finished_pending.place_options.size() == 1,
-			"纯值终局门禁不得改写输入 pending");
-}
-
 void test_chain_dictionary_contract_hides_opponent_facedown_identity() {
 	// OCGCore 卡片脚本常用 Stringid(card_id, effect_id)，其高位可直接还原卡号。
 	// 因此对手里侧候选必须同时隐藏 card_id 与 description；仅隐藏前者仍会泄密。
@@ -518,7 +481,6 @@ void run_contract_tests() {
 	test_place_selection_dictionary_uses_semantic_kind();
 	test_rejected_process_result_preserves_place_pending();
 	test_bridge_submits_only_current_place_option_to_real_session();
-	test_place_submission_gate_rejects_nonlocal_and_finished_pending();
 	test_chain_dictionary_contract_hides_opponent_facedown_identity();
 	test_bridge_rejects_negative_selection_before_narrowing();
 	std::fprintf(stdout, "PendingAction Godot 适配器契约测试通过\n");

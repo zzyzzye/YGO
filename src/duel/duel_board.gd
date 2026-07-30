@@ -262,6 +262,10 @@ func _show_place_options(snapshot: Dictionary) -> void:
 	_place_options_by_zone = mapped_options
 	for zone in _place_options_by_zone:
 		zone.set_place_candidate(true, _rule_decision_generation)
+	# 独立场景可以只提供规则快照而不附带状态；生产 Main 会传入更具体的
+	# 首次等待、提交失败或 Retry 文案，DuelBoard 不得覆盖那些上层诊断。
+	if str(snapshot.get("status_text", "")).is_empty():
+		show_status("请选择放置区域")
 
 
 func _find_place_candidate_zone(location: Dictionary) -> ZoneView:
@@ -948,8 +952,13 @@ func _request_exit() -> void:
 
 func _open_confirmation(kind: String, message: String) -> void:
 	# restart/exit 属于本地工具确认，不能覆盖 OCGCore 正在等待的任何规则决策；
-	# 只有新快照清理 YesNo、卡牌/表示形式/连锁等入口后才允许打开普通确认。
-	if _rule_decision_kind != "none":
+	# 它们也是界面无法映射规则候选时唯一的脱困入口，因此允许在规则等待期间
+	# 打开独立确认层。其他普通确认仍需等待新快照清理规则入口。
+	var is_system_escape := (
+		_rule_decision_kind == "select_place_unmapped"
+		and kind in ["restart", "exit"]
+	)
+	if _rule_decision_kind != "none" and !is_system_escape:
 		return
 	_confirmation_kind = kind
 	confirmation_label.text = message
