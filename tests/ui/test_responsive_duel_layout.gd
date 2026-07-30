@@ -443,13 +443,10 @@ func _assert_populated_layout(
 	var field_stage := board.find_child("FieldStage", true, false) as Control
 	var opponent_field := board.find_child("OpponentField", true, false) as Control
 	var player_field := board.find_child("PlayerField", true, false) as Control
-	if (
-		player_field.size.x <= opponent_field.size.x
-		or player_field.size.y <= opponent_field.size.y
-	):
+	if field_stage.size.x < safe_area.size.x * 0.84:
 		_fail(
-			"近端玩家场地必须大于远端对手场地：窗口 %s，状态 %s，玩家 %s / 对手 %s"
-			% [physical_size, scenario_name, player_field.size, opponent_field.size]
+			"统一棋盘必须接近铺满安全区域：窗口 %s，状态 %s，棋盘 %s / 安全区 %s"
+			% [physical_size, scenario_name, field_stage.size, safe_area.size]
 		)
 		return
 	var remote_zone_rect: Rect2 = (
@@ -459,12 +456,27 @@ func _assert_populated_layout(
 		board.player_monster_zones[0] as Control
 	).get_global_rect()
 	var remote_width_ratio := remote_zone_rect.size.x / local_zone_rect.size.x
-	if remote_width_ratio < 0.82 or remote_width_ratio > 0.88:
+	if remote_width_ratio < 0.98 or remote_width_ratio > 1.02:
 		_fail(
-			"远端卡位宽度必须为近端的 82%%～88%%：窗口 %s，状态 %s，比例 %.3f"
+			"双方主卡位必须沿统一棋盘网格等宽：窗口 %s，状态 %s，比例 %.3f"
 			% [physical_size, scenario_name, remote_width_ratio]
 		)
 		return
+	for extra_zone_name in [
+		"OpponentExtraMonsterZoneLeft",
+		"OpponentExtraMonsterZoneRight",
+	]:
+		var extra_zone := board.find_child(extra_zone_name, true, false) as Control
+		var extra_rect := extra_zone.get_global_rect()
+		for main_zone in (
+			board.player_monster_zones
+			+ board.player_spell_zones
+			+ board.opponent_monster_zones
+			+ board.opponent_spell_zones
+		):
+			if extra_rect.intersects((main_zone as Control).get_global_rect()):
+				_fail("中央预留格不得遮盖真实五区：" + extra_zone_name)
+				return
 	if (
 		opponent_field.global_position.y < field_stage.global_position.y
 		or player_field.global_position.y <= opponent_field.get_global_rect().end.y

@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 将纵向表格式决斗界面重构为中央连续棋盘、近端悬浮手牌、远端压缩场地和独立左右 HUD。
+**Goal:** 将纵向表格式决斗界面重构为接近全屏的统一棋盘、边缘悬浮手牌和覆盖式 HUD。
 
 **Architecture:** 保留 `DuelBoard`、`ZoneView`、`HandView` 的公开信号与快照接口，只在 `.tscn` 中重组稳定节点层级。四排卡位继续由 `HBoxContainer` 管理，棋盘、手牌、HUD 和浮层分别使用独立锚点层，GDScript 仅按视口比例应用紧凑模式。
 

@@ -43,10 +43,10 @@ mouse_filter = 2
 [node name="FieldStage" type="Control" parent="SafeArea"]
 unique_name_in_owner = true
 layout_mode = 1
-anchor_left = 0.18
-anchor_right = 0.82
-anchor_top = 0.14
-anchor_bottom = 0.8
+anchor_left = 0.04
+anchor_right = 0.96
+anchor_top = 0.08
+anchor_bottom = 0.92
 grow_horizontal = 2
 grow_vertical = 2
 mouse_filter = 1
@@ -63,17 +63,156 @@ grow_vertical = 2
 mouse_filter = 2
 color = Color(0.0588235, 0.0705882, 0.0862745, 0.72)
 
+[node name="SpecialZoneLayer" type="Control" parent="SafeArea/FieldStage"]
+unique_name_in_owner = true
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+
+[node name="OpponentExtraDeckSlot" type="Panel" parent="SafeArea/FieldStage/SpecialZoneLayer"]
+unique_name_in_owner = true
+modulate = Color(1, 1, 1, 0.52)
+layout_mode = 1
+anchor_left = 0.055
+anchor_top = 0.025
+anchor_right = 0.125
+anchor_bottom = 0.195
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+theme_type_variation = &"ZonePanel"
+
+[node name="OpponentGraveyardSlot" type="Panel" parent="SafeArea/FieldStage/SpecialZoneLayer"]
+unique_name_in_owner = true
+modulate = Color(1, 1, 1, 0.52)
+layout_mode = 1
+anchor_left = 0.055
+anchor_top = 0.225
+anchor_right = 0.125
+anchor_bottom = 0.395
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+theme_type_variation = &"ZonePanel"
+
+[node name="OpponentFieldZoneSlot" type="Panel" parent="SafeArea/FieldStage/SpecialZoneLayer"]
+unique_name_in_owner = true
+modulate = Color(1, 1, 1, 0.42)
+layout_mode = 1
+anchor_left = 0.875
+anchor_top = 0.225
+anchor_right = 0.945
+anchor_bottom = 0.395
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+theme_type_variation = &"ZonePanel"
+
+[node name="OpponentDeckSlot" type="Panel" parent="SafeArea/FieldStage/SpecialZoneLayer"]
+unique_name_in_owner = true
+modulate = Color(1, 1, 1, 0.52)
+layout_mode = 1
+anchor_left = 0.875
+anchor_top = 0.025
+anchor_right = 0.945
+anchor_bottom = 0.195
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+theme_type_variation = &"ZonePanel"
+
+[node name="OpponentExtraMonsterZoneLeft" type="Panel" parent="SafeArea/FieldStage/SpecialZoneLayer"]
+unique_name_in_owner = true
+modulate = Color(1, 1, 1, 0.58)
+layout_mode = 1
+anchor_left = 0.35
+anchor_top = 0.405
+anchor_right = 0.42
+anchor_bottom = 0.515
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+theme_type_variation = &"ZonePanel"
+
+[node name="OpponentExtraMonsterZoneRight" type="Panel" parent="SafeArea/FieldStage/SpecialZoneLayer"]
+unique_name_in_owner = true
+modulate = Color(1, 1, 1, 0.58)
+layout_mode = 1
+anchor_left = 0.58
+anchor_top = 0.405
+anchor_right = 0.65
+anchor_bottom = 0.515
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+theme_type_variation = &"ZonePanel"
+
+[node name="PlayerExtraDeckSlot" type="Panel" parent="SafeArea/FieldStage/SpecialZoneLayer"]
+unique_name_in_owner = true
+modulate = Color(1, 1, 1, 0.52)
+layout_mode = 1
+anchor_left = 0.055
+anchor_top = 0.805
+anchor_right = 0.125
+anchor_bottom = 0.975
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+theme_type_variation = &"ZonePanel"
+
+[node name="PlayerFieldZoneSlot" type="Panel" parent="SafeArea/FieldStage/SpecialZoneLayer"]
+unique_name_in_owner = true
+modulate = Color(1, 1, 1, 0.42)
+layout_mode = 1
+anchor_left = 0.055
+anchor_top = 0.605
+anchor_right = 0.125
+anchor_bottom = 0.775
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+theme_type_variation = &"ZonePanel"
+
+[node name="PlayerGraveyardSlot" type="Panel" parent="SafeArea/FieldStage/SpecialZoneLayer"]
+unique_name_in_owner = true
+modulate = Color(1, 1, 1, 0.52)
+layout_mode = 1
+anchor_left = 0.875
+anchor_top = 0.605
+anchor_right = 0.945
+anchor_bottom = 0.775
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+theme_type_variation = &"ZonePanel"
+
+[node name="PlayerDeckSlot" type="Panel" parent="SafeArea/FieldStage/SpecialZoneLayer"]
+unique_name_in_owner = true
+modulate = Color(1, 1, 1, 0.52)
+layout_mode = 1
+anchor_left = 0.875
+anchor_top = 0.805
+anchor_right = 0.945
+anchor_bottom = 0.975
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+theme_type_variation = &"ZonePanel"
+
 [node name="OpponentField" type="VBoxContainer" parent="SafeArea/FieldStage"]
 unique_name_in_owner = true
 layout_mode = 1
-anchor_left = 0.08
-anchor_right = 0.92
-anchor_bottom = 0.42
+anchor_left = 0.16
+anchor_right = 0.84
+anchor_top = 0.015
+anchor_bottom = 0.405
 grow_horizontal = 2
 grow_vertical = 2
 theme_type_variation = &"RemoteFieldLayout"
-pivot_offset = Vector2(503.1936, 289.3968)
-scale = Vector2(0.86, 0.86)
 
 [node name="OpponentSpellRow" type="HBoxContainer" parent="SafeArea/FieldStage/OpponentField"]
 unique_name_in_owner = true
@@ -124,7 +263,7 @@ unique_name_in_owner = true
 layout_mode = 1
 anchor_top = 0.42
 anchor_right = 1.0
-anchor_bottom = 0.48
+anchor_bottom = 0.5
 grow_horizontal = 2
 grow_vertical = 2
 mouse_filter = 2
@@ -140,9 +279,10 @@ grow_vertical = 2
 [node name="PlayerField" type="VBoxContainer" parent="SafeArea/FieldStage"]
 unique_name_in_owner = true
 layout_mode = 1
-anchor_top = 0.48
-anchor_right = 1.0
-anchor_bottom = 1.0
+anchor_left = 0.16
+anchor_top = 0.535
+anchor_right = 0.84
+anchor_bottom = 0.87
 grow_horizontal = 2
 grow_vertical = 2
 theme_type_variation = &"PlayerFieldLayout"

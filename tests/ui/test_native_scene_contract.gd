@@ -111,7 +111,11 @@ func _run() -> void:
 	await process_frame
 	for node_name in [
 		"Background", "SafeArea", "FieldStage", "HandLayer", "HudLayer",
-		"OverlayLayer", "OpponentField", "PlayerField", "OpponentHand",
+		"OverlayLayer", "OpponentField", "PlayerField", "SpecialZoneLayer",
+		"OpponentExtraMonsterZoneLeft", "OpponentExtraMonsterZoneRight",
+		"PlayerDeckSlot", "PlayerExtraDeckSlot", "PlayerGraveyardSlot",
+		"OpponentDeckSlot", "OpponentExtraDeckSlot", "OpponentGraveyardSlot",
+		"OpponentHand",
 		"OpponentSpellRow", "OpponentMonsterRow", "TurnLabel",
 		"PlayerMonsterRow", "PlayerSpellRow", "PlayerHand",
 		"OpponentStatusSurface", "OpponentStatus", "DirectAttackHighlight",
@@ -121,6 +125,20 @@ func _run() -> void:
 	]:
 		if board.find_child(node_name, true, false) == null:
 			_fail("DuelBoard 缺少固定节点：" + node_name)
+			return
+	for reserved_zone_name in [
+		"OpponentExtraMonsterZoneLeft",
+		"OpponentExtraMonsterZoneRight",
+		"PlayerDeckSlot",
+		"PlayerExtraDeckSlot",
+		"PlayerGraveyardSlot",
+		"OpponentDeckSlot",
+		"OpponentExtraDeckSlot",
+		"OpponentGraveyardSlot",
+	]:
+		var reserved_zone := board.find_child(reserved_zone_name, true, false) as Control
+		if reserved_zone.mouse_filter != Control.MOUSE_FILTER_IGNORE:
+			_fail("尚无 C++ 语义的预留区域必须忽略输入：" + reserved_zone_name)
 			return
 	# 棋盘、手牌、HUD 与规则浮层必须是兄弟层。这样显示确认框或改变手牌数量
 	# 时不会参与四排场地的 Container 尺寸分配，场地几何才能保持稳定。
