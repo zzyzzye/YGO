@@ -408,3 +408,88 @@ git add native/tests/test_duel_session.cpp \
 git commit -m "test(选区): 完成真实核心与多分辨率验收"
 git push origin main
 ```
+
+### Task 6: 最终审查集中修复
+
+**Files:**
+- Modify: `native/include/ygo/duel_session.hpp`
+- Modify: `native/src/duel_session.cpp`
+- Modify: `native/include/ygo/ygo_core_bridge.hpp`
+- Modify: `native/src/ygo_core_bridge.cpp`
+- Modify: `native/tests/test_duel_session.cpp`
+- Modify: `native/tests/test_pending_action_godot_adapter.cpp`
+- Modify: `src/duel/duel_board.gd`
+- Modify: `src/main/main.gd`
+- Modify: `tests/ui/test_contextual_duel_layout.gd`
+- Modify: `tests/ui/test_main_attack_target_flow.gd`
+
+**Interfaces:**
+- Consumes: 已验证的 `PendingActionKind::SelectPlace`、`PlaceOption[]` 与
+  `DuelSession::submit_place(uint8_t, uint8_t, uint8_t)`。
+- Produces: 玩家 2 的确定性选区策略、始终可用的重开/退出脱困路径、真实测试
+  证据、收紧的 Bridge 门禁边界和区分首次等待与 Retry 的中文提示。
+
+- [ ] **Step 1: 为自动对手区域策略编写失败测试**
+
+在原生测试中用字面量候选验证：玩家 2 的合法 `SelectPlace` 返回提交首项；
+玩家 1、空候选和非 `SelectPlace` 返回停止。再验证
+`advance_to_local_decision` 会通过语义接口消费对手区域决策。
+
+- [ ] **Step 2: 运行原生目标，确认因缺少策略失败**
+
+Run:
+
+```bash
+cmake --build build/native --target ygo_native_tests
+ctest --test-dir build/native --output-on-failure -R duel_session
+```
+
+Expected: 新断言因自动对手停在玩家 2 `SelectPlace` 而 FAIL。
+
+- [ ] **Step 3: 实现最小自动选区策略并验证通过**
+
+新增纯值策略，只有合法玩家 2 快照才返回候选首项；推进器仅调用
+`session.submit_place`。运行 Step 2 命令，Expected: PASS。
+
+- [ ] **Step 4: 为重开、退出和状态文案编写失败测试**
+
+Godot 测试构造 `select_place_unmapped`，通过真实按钮路径分别确认重开和退出
+确认可打开、取消后待决入口仍在；首次可映射快照显示“请选择放置区域”，Retry
+重建显示“OCGCore 拒绝了响应，请重新选择放置区域”。
+
+- [ ] **Step 5: 运行 Godot 目标，确认门禁和文案失败**
+
+Run:
+
+```bash
+godot --headless --path . --script tests/ui/test_contextual_duel_layout.gd
+godot --headless --path . --script tests/ui/test_main_attack_target_flow.gd
+```
+
+Expected: 重开/退出确认受阻或状态文字不符，测试 FAIL。
+
+- [ ] **Step 6: 最小修复系统确认门禁与中文状态**
+
+只允许 `restart`、`exit` 绕过规则门禁；阶段确认保持原逻辑。首次等待与 Retry
+分别由 DuelBoard 和 Main 的真实状态刷新路径设置明确中文提示。运行 Step 5
+命令，Expected: PASS。
+
+- [ ] **Step 7: 删除失真的 Retry 测试并收紧公开门禁**
+
+移除 `native/tests/test_duel_session.cpp` 中的 `private public` 和人工写入私有
+快照的 SelectPlace Retry 场景；保留所有通过公开 API 或真实核心产生的证据。
+将 `PlaceSubmissionGateResult` 与 `validate_place_submission_gate` 移到
+`native/src/ygo_core_bridge.cpp` 的匿名命名空间，并调整现有 Bridge 测试只验证
+公开语义行为。
+
+- [ ] **Step 8: 完整自动化与 Godot MCP 验收**
+
+运行 `./scripts/build_native.sh`、全部 Godot UI 测试、`git diff --check`。随后用
+Godot MCP 启动项目，检查真实场景树，覆盖可映射 SelectPlace、取消或非法路径、
+状态回传，以及 1920×1080 与 3840×2160；停止实例并确认没有 MCP 注入文件。
+
+- [ ] **Step 9: 审阅、提交并推送**
+
+检查 `git status --short`、暂存差异和 `origin/main..HEAD`，使用中文
+Conventional Commit 标题和含原因、修改、验证的正文提交，随后执行
+`git push origin main`。

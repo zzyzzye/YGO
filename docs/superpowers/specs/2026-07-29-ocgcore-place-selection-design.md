@@ -164,3 +164,26 @@ OCGCore MSG_SELECT_PLACE
 
 运行真实项目，通过场景树和截图确认 1920×1080 与 3840×2160 的原生场地；
 使用真实鼠标点击可选空卡位，确认高亮消失、场面刷新且调试输出无项目错误。
+
+## 最终审查修订
+
+区域选择上线前还需补齐以下边界，且不得扩大为未实现决策类型的通用自动策略：
+
+1. `advance_to_local_decision` 遇到玩家 2 的 `SelectPlace` 时，通过独立纯策略
+   校验快照并确定性选择候选首项，再调用 `DuelSession::submit_place`。本地玩家、
+   空候选或异常候选必须停止，不能构造默认三元组或原始响应。
+2. 重开与退出是本地系统脱困入口，不是 OCGCore 规则响应。即使区域候选无法
+   映射，它们也必须能够打开确认浮层；阶段选项仍受规则交互门禁约束。取消确认
+   只关闭浮层，不消费或改写当前待决快照。
+3. Session 的 Retry 回归不得用 `private public` 篡改 `pending_action_`，也不得
+   把 SelectPlace 响应故意发送给 Idle Processor。Retry 证据只能来自真实
+   OCGCore 状态，无法稳定制造时删除该失真用例，并由解析、响应构造、真实提交
+   与 Bridge/Godot Retry 契约分层覆盖。
+4. 区域提交门禁辅助函数属于 Bridge 实现细节，不作为项目公开 C++ API；Godot
+   只绑定 `submit_place(controller, location, sequence)` 语义入口。
+5. 首次等待区域输入时显示“请选择放置区域”；`MSG_RETRY` 恢复后显示
+   “OCGCore 拒绝了响应，请重新选择放置区域”。
+
+这轮修订不实现 `MSG_SELECT_EFFECTYN`、`MSG_SELECT_OPTION`、
+`MSG_SELECT_TRIBUTE`、`MSG_SELECT_COUNTER`、`MSG_SELECT_SUM`、
+`MSG_SELECT_UNSELECT_CARD`，也不为额外怪兽区、场地区等新增界面节点。
