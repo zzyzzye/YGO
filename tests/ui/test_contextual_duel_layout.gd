@@ -398,7 +398,10 @@ func _run() -> void:
 		_fail("情境式布局不能保留右侧永久操作列")
 		return
 	for required_name in [
-		"Battlefield",
+		"FieldStage",
+		"HandLayer",
+		"HudLayer",
+		"OverlayLayer",
 		"CardDetailOverlay",
 		"ContextActionBar",
 		"PhaseButton",
@@ -424,6 +427,8 @@ func _run() -> void:
 		return
 	var status_toast: Control = board.find_child("StatusToast", true, false)
 	var opponent_hand_control: Control = board.opponent_hand
+	var field_stage: Control = board.find_child("FieldStage", true, false)
+	var stable_field_rect := field_stage.get_global_rect()
 	if status_toast.get_global_rect().intersects(opponent_hand_control.get_global_rect()):
 		_fail("顶部状态提示不能覆盖对手手牌")
 		return
@@ -1245,6 +1250,17 @@ func _run() -> void:
 		_fail("连续回合快照没有反映双方抽牌与真实生命值")
 		return
 	real_bridge.destroy_duel()
+
+	# 上述用例依次打开动作条、位置选择、连锁、EffectYN 与确认层。它们只能
+	# 覆盖于棋盘上方，不能像旧 VBox 那样参与行高分配并挤压场地；系统脱困
+	# 入口也必须始终可用。
+	if (
+		!field_stage.get_global_rect().is_equal_approx(stable_field_rect)
+		or board.restart_button.disabled
+		or board.exit_button.disabled
+	):
+		_fail("规则浮层不得改变棋盘矩形或禁用重开、退出入口")
+		return
 
 	main.free()
 	hand.queue_free()

@@ -21,6 +21,7 @@ size_flags_vertical = 3
 
 [node name="TitleLabel" type="Label" parent="Stack" unique_id=1587735771]
 unique_name_in_owner = true
+visible = false
 modulate = Color(0.811765, 0.811765, 0.811765, 1)
 layout_mode = 2
 theme_override_font_sizes/font_size = 15

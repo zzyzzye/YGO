@@ -38,140 +38,223 @@ offset_right = -24.0
 offset_bottom = -18.0
 grow_horizontal = 2
 grow_vertical = 2
-mouse_filter = 1
+mouse_filter = 2
 
-[node name="Battlefield" type="VBoxContainer" parent="SafeArea"]
+[node name="FieldStage" type="Control" parent="SafeArea"]
 unique_name_in_owner = true
 layout_mode = 1
 anchor_left = 0.18
 anchor_right = 0.82
+anchor_top = 0.14
+anchor_bottom = 0.8
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 1
+
+[node name="FieldSurface" type="ColorRect" parent="SafeArea/FieldStage"]
+unique_name_in_owner = true
+show_behind_parent = true
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
 anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
-theme_type_variation = &"BattlefieldLayout"
+mouse_filter = 2
+color = Color(0.0588235, 0.0705882, 0.0862745, 0.72)
 
-[node name="OpponentHand" parent="SafeArea/Battlefield" instance=ExtResource("3_hand")]
-unique_name_in_owner = true
-custom_minimum_size = Vector2(0, 128)
-layout_mode = 2
-
-[node name="OpponentSpellRow" type="HBoxContainer" parent="SafeArea/Battlefield"]
-unique_name_in_owner = true
-layout_mode = 2
-size_flags_vertical = 3
-theme_type_variation = &"ZoneRowLayout"
-alignment = 1
-
-[node name="OpponentSpellZone1" parent="SafeArea/Battlefield/OpponentSpellRow" instance=ExtResource("4_zone")]
-layout_mode = 2
-
-[node name="OpponentSpellZone2" parent="SafeArea/Battlefield/OpponentSpellRow" instance=ExtResource("4_zone")]
-layout_mode = 2
-
-[node name="OpponentSpellZone3" parent="SafeArea/Battlefield/OpponentSpellRow" instance=ExtResource("4_zone")]
-layout_mode = 2
-
-[node name="OpponentSpellZone4" parent="SafeArea/Battlefield/OpponentSpellRow" instance=ExtResource("4_zone")]
-layout_mode = 2
-
-[node name="OpponentSpellZone5" parent="SafeArea/Battlefield/OpponentSpellRow" instance=ExtResource("4_zone")]
-layout_mode = 2
-
-[node name="OpponentMonsterRow" type="HBoxContainer" parent="SafeArea/Battlefield"]
-unique_name_in_owner = true
-layout_mode = 2
-size_flags_vertical = 3
-theme_type_variation = &"ZoneRowLayout"
-alignment = 1
-
-[node name="OpponentMonsterZone1" parent="SafeArea/Battlefield/OpponentMonsterRow" instance=ExtResource("4_zone")]
-layout_mode = 2
-
-[node name="OpponentMonsterZone2" parent="SafeArea/Battlefield/OpponentMonsterRow" instance=ExtResource("4_zone")]
-layout_mode = 2
-
-[node name="OpponentMonsterZone3" parent="SafeArea/Battlefield/OpponentMonsterRow" instance=ExtResource("4_zone")]
-layout_mode = 2
-
-[node name="OpponentMonsterZone4" parent="SafeArea/Battlefield/OpponentMonsterRow" instance=ExtResource("4_zone")]
-layout_mode = 2
-
-[node name="OpponentMonsterZone5" parent="SafeArea/Battlefield/OpponentMonsterRow" instance=ExtResource("4_zone")]
-layout_mode = 2
-
-[node name="FieldDivider" type="HSeparator" parent="SafeArea/Battlefield"]
-custom_minimum_size = Vector2(0, 14)
-layout_mode = 2
-
-[node name="TurnLabel" type="Label" parent="SafeArea/Battlefield"]
-unique_name_in_owner = true
-layout_mode = 2
-theme_override_font_sizes/font_size = 22
-text = "等待决斗数据"
-horizontal_alignment = 1
-
-[node name="PlayerMonsterRow" type="HBoxContainer" parent="SafeArea/Battlefield"]
-unique_name_in_owner = true
-layout_mode = 2
-size_flags_vertical = 3
-theme_type_variation = &"ZoneRowLayout"
-alignment = 1
-
-[node name="PlayerMonsterZone1" parent="SafeArea/Battlefield/PlayerMonsterRow" instance=ExtResource("4_zone")]
-layout_mode = 2
-
-[node name="PlayerMonsterZone2" parent="SafeArea/Battlefield/PlayerMonsterRow" instance=ExtResource("4_zone")]
-layout_mode = 2
-
-[node name="PlayerMonsterZone3" parent="SafeArea/Battlefield/PlayerMonsterRow" instance=ExtResource("4_zone")]
-layout_mode = 2
-
-[node name="PlayerMonsterZone4" parent="SafeArea/Battlefield/PlayerMonsterRow" instance=ExtResource("4_zone")]
-layout_mode = 2
-
-[node name="PlayerMonsterZone5" parent="SafeArea/Battlefield/PlayerMonsterRow" instance=ExtResource("4_zone")]
-layout_mode = 2
-
-[node name="PlayerSpellRow" type="HBoxContainer" parent="SafeArea/Battlefield"]
-unique_name_in_owner = true
-layout_mode = 2
-size_flags_vertical = 3
-theme_type_variation = &"ZoneRowLayout"
-alignment = 1
-
-[node name="PlayerSpellZone1" parent="SafeArea/Battlefield/PlayerSpellRow" instance=ExtResource("4_zone")]
-layout_mode = 2
-
-[node name="PlayerSpellZone2" parent="SafeArea/Battlefield/PlayerSpellRow" instance=ExtResource("4_zone")]
-layout_mode = 2
-
-[node name="PlayerSpellZone3" parent="SafeArea/Battlefield/PlayerSpellRow" instance=ExtResource("4_zone")]
-layout_mode = 2
-
-[node name="PlayerSpellZone4" parent="SafeArea/Battlefield/PlayerSpellRow" instance=ExtResource("4_zone")]
-layout_mode = 2
-
-[node name="PlayerSpellZone5" parent="SafeArea/Battlefield/PlayerSpellRow" instance=ExtResource("4_zone")]
-layout_mode = 2
-
-[node name="PlayerHand" parent="SafeArea/Battlefield" instance=ExtResource("3_hand")]
-unique_name_in_owner = true
-custom_minimum_size = Vector2(0, 146)
-layout_mode = 2
-
-[node name="OpponentStatusSurface" type="Control" parent="SafeArea"]
+[node name="OpponentField" type="VBoxContainer" parent="SafeArea/FieldStage"]
 unique_name_in_owner = true
 layout_mode = 1
-anchors_preset = 1
-anchor_left = 1.0
+anchor_left = 0.08
+anchor_right = 0.92
+anchor_bottom = 0.42
+grow_horizontal = 2
+grow_vertical = 2
+theme_type_variation = &"RemoteFieldLayout"
+pivot_offset = Vector2(503.1936, 289.3968)
+scale = Vector2(0.86, 0.86)
+
+[node name="OpponentSpellRow" type="HBoxContainer" parent="SafeArea/FieldStage/OpponentField"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_vertical = 3
+theme_type_variation = &"ZoneRowLayout"
+alignment = 1
+
+[node name="OpponentSpellZone1" parent="SafeArea/FieldStage/OpponentField/OpponentSpellRow" instance=ExtResource("4_zone")]
+layout_mode = 2
+
+[node name="OpponentSpellZone2" parent="SafeArea/FieldStage/OpponentField/OpponentSpellRow" instance=ExtResource("4_zone")]
+layout_mode = 2
+
+[node name="OpponentSpellZone3" parent="SafeArea/FieldStage/OpponentField/OpponentSpellRow" instance=ExtResource("4_zone")]
+layout_mode = 2
+
+[node name="OpponentSpellZone4" parent="SafeArea/FieldStage/OpponentField/OpponentSpellRow" instance=ExtResource("4_zone")]
+layout_mode = 2
+
+[node name="OpponentSpellZone5" parent="SafeArea/FieldStage/OpponentField/OpponentSpellRow" instance=ExtResource("4_zone")]
+layout_mode = 2
+
+[node name="OpponentMonsterRow" type="HBoxContainer" parent="SafeArea/FieldStage/OpponentField"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_vertical = 3
+theme_type_variation = &"ZoneRowLayout"
+alignment = 1
+
+[node name="OpponentMonsterZone1" parent="SafeArea/FieldStage/OpponentField/OpponentMonsterRow" instance=ExtResource("4_zone")]
+layout_mode = 2
+
+[node name="OpponentMonsterZone2" parent="SafeArea/FieldStage/OpponentField/OpponentMonsterRow" instance=ExtResource("4_zone")]
+layout_mode = 2
+
+[node name="OpponentMonsterZone3" parent="SafeArea/FieldStage/OpponentField/OpponentMonsterRow" instance=ExtResource("4_zone")]
+layout_mode = 2
+
+[node name="OpponentMonsterZone4" parent="SafeArea/FieldStage/OpponentField/OpponentMonsterRow" instance=ExtResource("4_zone")]
+layout_mode = 2
+
+[node name="OpponentMonsterZone5" parent="SafeArea/FieldStage/OpponentField/OpponentMonsterRow" instance=ExtResource("4_zone")]
+layout_mode = 2
+
+[node name="CenterLane" type="Control" parent="SafeArea/FieldStage"]
+unique_name_in_owner = true
+layout_mode = 1
+anchor_top = 0.42
 anchor_right = 1.0
-offset_left = -410.0
-offset_top = 10.0
-offset_bottom = 72.0
+anchor_bottom = 0.48
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+
+[node name="FieldDivider" type="HSeparator" parent="SafeArea/FieldStage/CenterLane"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="PlayerField" type="VBoxContainer" parent="SafeArea/FieldStage"]
+unique_name_in_owner = true
+layout_mode = 1
+anchor_top = 0.48
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_type_variation = &"PlayerFieldLayout"
+
+[node name="PlayerMonsterRow" type="HBoxContainer" parent="SafeArea/FieldStage/PlayerField"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_vertical = 3
+theme_type_variation = &"ZoneRowLayout"
+alignment = 1
+
+[node name="PlayerMonsterZone1" parent="SafeArea/FieldStage/PlayerField/PlayerMonsterRow" instance=ExtResource("4_zone")]
+layout_mode = 2
+
+[node name="PlayerMonsterZone2" parent="SafeArea/FieldStage/PlayerField/PlayerMonsterRow" instance=ExtResource("4_zone")]
+layout_mode = 2
+
+[node name="PlayerMonsterZone3" parent="SafeArea/FieldStage/PlayerField/PlayerMonsterRow" instance=ExtResource("4_zone")]
+layout_mode = 2
+
+[node name="PlayerMonsterZone4" parent="SafeArea/FieldStage/PlayerField/PlayerMonsterRow" instance=ExtResource("4_zone")]
+layout_mode = 2
+
+[node name="PlayerMonsterZone5" parent="SafeArea/FieldStage/PlayerField/PlayerMonsterRow" instance=ExtResource("4_zone")]
+layout_mode = 2
+
+[node name="PlayerSpellRow" type="HBoxContainer" parent="SafeArea/FieldStage/PlayerField"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_vertical = 3
+theme_type_variation = &"ZoneRowLayout"
+alignment = 1
+
+[node name="PlayerSpellZone1" parent="SafeArea/FieldStage/PlayerField/PlayerSpellRow" instance=ExtResource("4_zone")]
+layout_mode = 2
+
+[node name="PlayerSpellZone2" parent="SafeArea/FieldStage/PlayerField/PlayerSpellRow" instance=ExtResource("4_zone")]
+layout_mode = 2
+
+[node name="PlayerSpellZone3" parent="SafeArea/FieldStage/PlayerField/PlayerSpellRow" instance=ExtResource("4_zone")]
+layout_mode = 2
+
+[node name="PlayerSpellZone4" parent="SafeArea/FieldStage/PlayerField/PlayerSpellRow" instance=ExtResource("4_zone")]
+layout_mode = 2
+
+[node name="PlayerSpellZone5" parent="SafeArea/FieldStage/PlayerField/PlayerSpellRow" instance=ExtResource("4_zone")]
+layout_mode = 2
+
+[node name="HandLayer" type="Control" parent="SafeArea"]
+unique_name_in_owner = true
+z_index = 4
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+
+[node name="OpponentHand" parent="SafeArea/HandLayer" instance=ExtResource("3_hand")]
+unique_name_in_owner = true
+layout_mode = 1
+anchor_left = 0.31
+anchor_right = 0.69
+offset_bottom = 149.0
+grow_horizontal = 2
+grow_vertical = 1
+pivot_offset = Vector2(355.68, 0)
+scale = Vector2(0.8, 0.8)
+
+[node name="PlayerHand" parent="SafeArea/HandLayer" instance=ExtResource("3_hand")]
+unique_name_in_owner = true
+layout_mode = 1
+anchor_left = 0.25
+anchor_top = 0.82
+anchor_right = 0.75
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 0
+
+[node name="HudLayer" type="Control" parent="SafeArea"]
+unique_name_in_owner = true
+z_index = 8
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+
+[node name="OpponentHud" type="Control" parent="SafeArea/HudLayer"]
+unique_name_in_owner = true
+layout_mode = 1
+anchor_left = 0.72
+anchor_right = 1.0
+anchor_bottom = 0.1
 grow_horizontal = 0
+grow_vertical = 2
+mouse_filter = 1
+
+[node name="OpponentStatusSurface" type="Control" parent="SafeArea/HudLayer/OpponentHud"]
+unique_name_in_owner = true
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
 mouse_default_cursor_shape = 2
 
-[node name="OpponentStatus" type="Label" parent="SafeArea/OpponentStatusSurface"]
+[node name="OpponentStatus" type="Label" parent="SafeArea/HudLayer/OpponentHud/OpponentStatusSurface"]
 unique_name_in_owner = true
 layout_mode = 1
 anchors_preset = 15
@@ -180,14 +263,10 @@ anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
 mouse_filter = 2
-theme_override_colors/font_color = Color(0.956863, 0.968627, 0.980392, 1)
-theme_override_colors/font_shadow_color = Color(0, 0, 0, 1)
-theme_override_constants/shadow_offset_x = 2
-theme_override_constants/shadow_offset_y = 2
-theme_override_font_sizes/font_size = 20
+theme_type_variation = &"HudStatus"
 horizontal_alignment = 2
 
-[node name="DirectAttackHighlight" type="Panel" parent="SafeArea/OpponentStatusSurface"]
+[node name="DirectAttackHighlight" type="Panel" parent="SafeArea/HudLayer/OpponentHud/OpponentStatusSurface"]
 unique_name_in_owner = true
 visible = false
 z_index = 1
@@ -200,30 +279,56 @@ grow_vertical = 2
 mouse_filter = 2
 theme_type_variation = &"DirectAttackTarget"
 
-[node name="PlayerStatus" type="Label" parent="SafeArea"]
+[node name="PlayerHud" type="Control" parent="SafeArea/HudLayer"]
 unique_name_in_owner = true
 layout_mode = 1
-anchors_preset = 2
-anchor_top = 1.0
+anchor_top = 0.9
+anchor_right = 0.28
 anchor_bottom = 1.0
-offset_top = -72.0
-offset_right = 410.0
-offset_bottom = -10.0
+grow_horizontal = 2
 grow_vertical = 0
-theme_override_colors/font_color = Color(0.956863, 0.968627, 0.980392, 1)
-theme_override_colors/font_shadow_color = Color(0, 0, 0, 1)
-theme_override_constants/shadow_offset_x = 2
-theme_override_constants/shadow_offset_y = 2
-theme_override_font_sizes/font_size = 20
+mouse_filter = 1
 
-[node name="PhaseButton" type="Button" parent="SafeArea"]
+[node name="PlayerStatus" type="Label" parent="SafeArea/HudLayer/PlayerHud"]
+unique_name_in_owner = true
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_type_variation = &"HudStatus"
+
+[node name="TurnPhaseHud" type="Control" parent="SafeArea/HudLayer"]
+unique_name_in_owner = true
+layout_mode = 1
+anchor_left = 0.84
+anchor_top = 0.38
+anchor_right = 0.98
+anchor_bottom = 0.62
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 1
+
+[node name="TurnLabel" type="Label" parent="SafeArea/HudLayer/TurnPhaseHud"]
+unique_name_in_owner = true
+layout_mode = 1
+anchor_right = 1.0
+anchor_bottom = 0.22
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_font_sizes/font_size = 22
+text = "等待决斗数据"
+horizontal_alignment = 1
+
+[node name="PhaseButton" type="Button" parent="SafeArea/HudLayer/TurnPhaseHud"]
 unique_name_in_owner = true
 z_index = 8
 layout_mode = 1
 anchors_preset = 8
-anchor_left = 0.89
+anchor_left = 0.5
 anchor_top = 0.5
-anchor_right = 0.89
+anchor_right = 0.5
 anchor_bottom = 0.5
 offset_left = -72.0
 offset_top = -72.0
@@ -236,7 +341,7 @@ theme_type_variation = &"PhaseButton"
 disabled = true
 text = "玩家1\n主要阶段"
 
-[node name="SystemTools" type="HBoxContainer" parent="SafeArea"]
+[node name="SystemTools" type="HBoxContainer" parent="SafeArea/HudLayer"]
 unique_name_in_owner = true
 z_index = 9
 layout_mode = 1
@@ -251,7 +356,7 @@ grow_vertical = 0
 theme_type_variation = &"SystemToolsLayout"
 alignment = 2
 
-[node name="RestartButton" type="Button" parent="SafeArea/SystemTools"]
+[node name="RestartButton" type="Button" parent="SafeArea/HudLayer/SystemTools"]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(58, 58)
 layout_mode = 2
@@ -260,7 +365,7 @@ tooltip_text = "重新开局"
 theme_type_variation = &"SystemButton"
 text = "↻"
 
-[node name="DebugButton" type="Button" parent="SafeArea/SystemTools"]
+[node name="DebugButton" type="Button" parent="SafeArea/HudLayer/SystemTools"]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(58, 58)
 layout_mode = 2
@@ -269,7 +374,7 @@ tooltip_text = "诊断信息"
 theme_type_variation = &"SystemButton"
 text = "i"
 
-[node name="ExitButton" type="Button" parent="SafeArea/SystemTools"]
+[node name="ExitButton" type="Button" parent="SafeArea/HudLayer/SystemTools"]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(58, 58)
 layout_mode = 2
@@ -278,7 +383,18 @@ tooltip_text = "退出游戏"
 theme_type_variation = &"SystemButton"
 text = "×"
 
-[node name="StatusToast" type="Label" parent="SafeArea"]
+[node name="OverlayLayer" type="Control" parent="SafeArea"]
+unique_name_in_owner = true
+z_index = 10
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+
+[node name="StatusToast" type="Label" parent="SafeArea/OverlayLayer"]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(280, 0)
 z_index = 14
@@ -296,7 +412,7 @@ vertical_alignment = 1
 text_overrun_behavior = 3
 clip_text = true
 
-[node name="CardDetailOverlay" type="PanelContainer" parent="SafeArea"]
+[node name="CardDetailOverlay" type="PanelContainer" parent="SafeArea/OverlayLayer"]
 unique_name_in_owner = true
 visible = false
 z_index = 10
@@ -309,41 +425,41 @@ grow_horizontal = 2
 grow_vertical = 2
 theme_type_variation = &"OverlayPanel"
 
-[node name="DetailContent" type="VBoxContainer" parent="SafeArea/CardDetailOverlay"]
+[node name="DetailContent" type="VBoxContainer" parent="SafeArea/OverlayLayer/CardDetailOverlay"]
 layout_mode = 2
 theme_override_constants/separation = 8
 
-[node name="DetailName" type="Label" parent="SafeArea/CardDetailOverlay/DetailContent"]
+[node name="DetailName" type="Label" parent="SafeArea/OverlayLayer/CardDetailOverlay/DetailContent"]
 unique_name_in_owner = true
 layout_mode = 2
 theme_override_font_sizes/font_size = 24
 autowrap_mode = 2
 
-[node name="DetailImage" type="TextureRect" parent="SafeArea/CardDetailOverlay/DetailContent"]
+[node name="DetailImage" type="TextureRect" parent="SafeArea/OverlayLayer/CardDetailOverlay/DetailContent"]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(240, 350)
 layout_mode = 2
 expand_mode = 1
 stretch_mode = 5
 
-[node name="DetailType" type="Label" parent="SafeArea/CardDetailOverlay/DetailContent"]
+[node name="DetailType" type="Label" parent="SafeArea/OverlayLayer/CardDetailOverlay/DetailContent"]
 unique_name_in_owner = true
 modulate = Color(0.741176, 0.780392, 0.815686, 1)
 layout_mode = 2
 autowrap_mode = 2
 
-[node name="DetailScroll" type="ScrollContainer" parent="SafeArea/CardDetailOverlay/DetailContent"]
+[node name="DetailScroll" type="ScrollContainer" parent="SafeArea/OverlayLayer/CardDetailOverlay/DetailContent"]
 layout_mode = 2
 size_flags_vertical = 3
 
-[node name="DetailText" type="Label" parent="SafeArea/CardDetailOverlay/DetailContent/DetailScroll"]
+[node name="DetailText" type="Label" parent="SafeArea/OverlayLayer/CardDetailOverlay/DetailContent/DetailScroll"]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(390, 0)
 layout_mode = 2
 size_flags_horizontal = 3
 autowrap_mode = 2
 
-[node name="ContextActionBar" type="HBoxContainer" parent="SafeArea"]
+[node name="ContextActionBar" type="HBoxContainer" parent="SafeArea/OverlayLayer"]
 unique_name_in_owner = true
 visible = false
 z_index = 12
@@ -357,7 +473,7 @@ grow_vertical = 2
 theme_type_variation = &"ContextActionBarLayout"
 alignment = 1
 
-[node name="ConfirmationOverlay" type="PanelContainer" parent="SafeArea"]
+[node name="ConfirmationOverlay" type="PanelContainer" parent="SafeArea/OverlayLayer"]
 unique_name_in_owner = true
 visible = false
 z_index = 18
@@ -370,23 +486,23 @@ grow_horizontal = 2
 grow_vertical = 2
 theme_type_variation = &"OverlayPanel"
 
-[node name="ConfirmationContent" type="VBoxContainer" parent="SafeArea/ConfirmationOverlay"]
+[node name="ConfirmationContent" type="VBoxContainer" parent="SafeArea/OverlayLayer/ConfirmationOverlay"]
 layout_mode = 2
 theme_override_constants/separation = 10
 
-[node name="ConfirmationLabel" type="Label" parent="SafeArea/ConfirmationOverlay/ConfirmationContent"]
+[node name="ConfirmationLabel" type="Label" parent="SafeArea/OverlayLayer/ConfirmationOverlay/ConfirmationContent"]
 unique_name_in_owner = true
 layout_mode = 2
 theme_override_font_sizes/font_size = 20
 horizontal_alignment = 1
 
-[node name="ConfirmationButtons" type="HBoxContainer" parent="SafeArea/ConfirmationOverlay/ConfirmationContent"]
+[node name="ConfirmationButtons" type="HBoxContainer" parent="SafeArea/OverlayLayer/ConfirmationOverlay/ConfirmationContent"]
 unique_name_in_owner = true
 layout_mode = 2
 theme_override_constants/separation = 10
 alignment = 1
 
-[node name="DebugOverlay" type="Label" parent="SafeArea"]
+[node name="DebugOverlay" type="Label" parent="SafeArea/OverlayLayer"]
 unique_name_in_owner = true
 visible = false
 z_index = 20
@@ -403,5 +519,5 @@ theme_override_constants/shadow_offset_x = 2
 theme_override_constants/shadow_offset_y = 2
 horizontal_alignment = 1
 
-[node name="AnimationPlayer" type="AnimationPlayer" parent="SafeArea"]
+[node name="AnimationPlayer" type="AnimationPlayer" parent="SafeArea/OverlayLayer"]
 unique_name_in_owner = true

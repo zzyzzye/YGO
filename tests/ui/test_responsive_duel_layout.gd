@@ -43,6 +43,9 @@ func _run() -> void:
 			"项目逻辑视口必须固定为 1920×1080，实际为 " + str(root.content_scale_size)
 		)
 		return
+	if root.content_scale_aspect != Window.CONTENT_SCALE_ASPECT_EXPAND:
+		_fail("项目必须使用 expand Stretch，使 16:10 的额外高度进入可用布局")
+		return
 	for physical_size in PHYSICAL_WINDOW_SIZES:
 		await _configure_physical_window(physical_size)
 		if _failed:
@@ -327,14 +330,21 @@ func _assert_stretch_contract(physical_size: Vector2i) -> void:
 		)
 		return
 	var visible_rect := root.get_visible_rect()
+	var expected_visible_size := Vector2(physical_size) / expected_transform.get_scale()
 	if (
 		!visible_rect.position.is_equal_approx(Vector2.ZERO)
-		or !visible_rect.size.is_equal_approx(Vector2(LOGICAL_SIZE))
+		or !visible_rect.size.is_equal_approx(expected_visible_size)
 	):
 		_fail(
 			"逻辑画布错误：窗口 %s，期望 %s，实际 %s"
-			% [physical_size, Rect2(Vector2.ZERO, Vector2(LOGICAL_SIZE)), visible_rect]
+			% [physical_size, Rect2(Vector2.ZERO, expected_visible_size), visible_rect]
 		)
+		return
+	if (
+		physical_size == Vector2i(1920, 1200)
+		and visible_rect.size.y <= float(LOGICAL_SIZE.y)
+	):
+		_fail("16:10 必须扩展逻辑可用高度，不能重复使用 16:9 的同一矩形")
 		return
 	var expected_final_transform := _expected_final_transform(physical_size)
 	var actual_final_transform := root.get_final_transform()
@@ -346,7 +356,7 @@ func _assert_stretch_contract(physical_size: Vector2i) -> void:
 		return
 	var physical_content_rect := Rect2(
 		expected_final_transform.origin,
-		expected_final_transform.get_scale() * Vector2(LOGICAL_SIZE)
+		expected_final_transform.get_scale() * expected_visible_size
 	)
 	if !Rect2(Vector2.ZERO, Vector2(physical_size)).encloses(physical_content_rect):
 		_fail("Stretch 后的逻辑画布离开物理窗口：" + str(physical_size))
@@ -357,6 +367,13 @@ func _expected_stretch_transform(physical_size: Vector2i) -> Transform2D:
 	if root.content_scale_aspect == Window.CONTENT_SCALE_ASPECT_IGNORE:
 		return Transform2D(Vector2(axis_scale.x, 0.0), Vector2(0.0, axis_scale.y), Vector2.ZERO)
 	if root.content_scale_aspect == Window.CONTENT_SCALE_ASPECT_KEEP:
+		var uniform_scale := minf(axis_scale.x, axis_scale.y)
+		return Transform2D(
+			Vector2(uniform_scale, 0.0),
+			Vector2(0.0, uniform_scale),
+			Vector2.ZERO
+		)
+	if root.content_scale_aspect == Window.CONTENT_SCALE_ASPECT_EXPAND:
 		var uniform_scale := minf(axis_scale.x, axis_scale.y)
 		return Transform2D(
 			Vector2(uniform_scale, 0.0),
@@ -380,7 +397,7 @@ func _assert_populated_layout(
 	physical_size: Vector2i,
 	scenario_name: String
 ) -> void:
-	var logical_rect := Rect2(Vector2.ZERO, Vector2(LOGICAL_SIZE))
+	var logical_rect := root.get_visible_rect()
 	var safe_area_node := board.find_child("SafeArea", true, false)
 	if !(safe_area_node is Control):
 		_fail("决斗场景缺少 SafeArea：窗口 %s，状态 %s" % [
@@ -400,7 +417,12 @@ func _assert_populated_layout(
 		return
 	var safe_rect := safe_area.get_global_rect()
 	var key_control_names := [
-		"Battlefield",
+		"FieldStage",
+		"OpponentField",
+		"PlayerField",
+		"HandLayer",
+		"HudLayer",
+		"OverlayLayer",
 		"PlayerHand",
 		"OpponentHand",
 		"StatusToast",
@@ -418,10 +440,55 @@ func _assert_populated_layout(
 			node_name
 		):
 			return
+	var field_stage := board.find_child("FieldStage", true, false) as Control
+	var opponent_field := board.find_child("OpponentField", true, false) as Control
+	var player_field := board.find_child("PlayerField", true, false) as Control
+	if (
+		player_field.size.x <= opponent_field.size.x
+		or player_field.size.y <= opponent_field.size.y
+	):
+		_fail(
+			"近端玩家场地必须大于远端对手场地：窗口 %s，状态 %s，玩家 %s / 对手 %s"
+			% [physical_size, scenario_name, player_field.size, opponent_field.size]
+		)
+		return
+	var remote_zone_rect: Rect2 = (
+		board.opponent_monster_zones[0] as Control
+	).get_global_rect()
+	var local_zone_rect: Rect2 = (
+		board.player_monster_zones[0] as Control
+	).get_global_rect()
+	var remote_width_ratio := remote_zone_rect.size.x / local_zone_rect.size.x
+	if remote_width_ratio < 0.82 or remote_width_ratio > 0.88:
+		_fail(
+			"远端卡位宽度必须为近端的 82%%～88%%：窗口 %s，状态 %s，比例 %.3f"
+			% [physical_size, scenario_name, remote_width_ratio]
+		)
+		return
+	if (
+		opponent_field.global_position.y < field_stage.global_position.y
+		or player_field.global_position.y <= opponent_field.get_global_rect().end.y
+		or player_field.get_global_rect().end.y > field_stage.get_global_rect().end.y + 1.0
+	):
+		_fail("近远场地必须在连续棋盘内按纵向顺序排列：窗口 %s，状态 %s" % [
+			physical_size,
+			scenario_name,
+		])
+		return
 	var action_bar := board.action_box
 	var player_hand := board.player_hand
 	var status := board.status_label
 	var opponent_hand := board.opponent_hand
+	if (
+		player_hand.global_position.y <= player_field.global_position.y
+		or opponent_hand.size.x >= player_hand.size.x
+		or player_hand.get_global_rect().intersects(board.phase_button.get_global_rect())
+	):
+		_fail("手牌必须悬浮于近端且不覆盖阶段 HUD：窗口 %s，状态 %s" % [
+			physical_size,
+			scenario_name,
+		])
+		return
 	var tools_node := board.find_child("SystemTools", true, false)
 	if !(tools_node is HBoxContainer):
 		_fail("决斗场景缺少系统工具容器：窗口 %s，状态 %s" % [

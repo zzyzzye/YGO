@@ -31,6 +31,10 @@ var opponent_monster_zones: Array = []
 var opponent_spell_zones: Array = []
 # 固定节点全部由 duel_board.tscn 持有。脚本只绑定语义节点并驱动状态，
 # 避免运行时拼装导致 Theme 继承、Container 重排和输入命中规则不稳定。
+@onready var field_stage: Control = %FieldStage
+@onready var hand_layer: Control = %HandLayer
+@onready var hud_layer: Control = %HudLayer
+@onready var overlay_layer: Control = %OverlayLayer
 @onready var player_hand: HandView = %PlayerHand
 @onready var opponent_hand: HandView = %OpponentHand
 @onready var detail_overlay: PanelContainer = %CardDetailOverlay
@@ -84,33 +88,35 @@ var _place_options_by_zone: Dictionary = {}
 func _ready() -> void:
 	# OCGCore 的 sequence=0..4 对应画面标号 1..5。对手卡位在场景树中按
 	# 5→1 的视觉顺序排列，因此这里必须逐个绑定语义节点，不能依赖子节点顺序。
+	# 四个顶层布局层只承载视觉几何；规则快照不得重建或换父节点，否则动态
+	# 确认框会反向改变棋盘尺寸并让候选点击区域漂移。
 	player_monster_zones = [
-		$SafeArea/Battlefield/PlayerMonsterRow/PlayerMonsterZone1,
-		$SafeArea/Battlefield/PlayerMonsterRow/PlayerMonsterZone2,
-		$SafeArea/Battlefield/PlayerMonsterRow/PlayerMonsterZone3,
-		$SafeArea/Battlefield/PlayerMonsterRow/PlayerMonsterZone4,
-		$SafeArea/Battlefield/PlayerMonsterRow/PlayerMonsterZone5,
+		$SafeArea/FieldStage/PlayerField/PlayerMonsterRow/PlayerMonsterZone1,
+		$SafeArea/FieldStage/PlayerField/PlayerMonsterRow/PlayerMonsterZone2,
+		$SafeArea/FieldStage/PlayerField/PlayerMonsterRow/PlayerMonsterZone3,
+		$SafeArea/FieldStage/PlayerField/PlayerMonsterRow/PlayerMonsterZone4,
+		$SafeArea/FieldStage/PlayerField/PlayerMonsterRow/PlayerMonsterZone5,
 	]
 	player_spell_zones = [
-		$SafeArea/Battlefield/PlayerSpellRow/PlayerSpellZone1,
-		$SafeArea/Battlefield/PlayerSpellRow/PlayerSpellZone2,
-		$SafeArea/Battlefield/PlayerSpellRow/PlayerSpellZone3,
-		$SafeArea/Battlefield/PlayerSpellRow/PlayerSpellZone4,
-		$SafeArea/Battlefield/PlayerSpellRow/PlayerSpellZone5,
+		$SafeArea/FieldStage/PlayerField/PlayerSpellRow/PlayerSpellZone1,
+		$SafeArea/FieldStage/PlayerField/PlayerSpellRow/PlayerSpellZone2,
+		$SafeArea/FieldStage/PlayerField/PlayerSpellRow/PlayerSpellZone3,
+		$SafeArea/FieldStage/PlayerField/PlayerSpellRow/PlayerSpellZone4,
+		$SafeArea/FieldStage/PlayerField/PlayerSpellRow/PlayerSpellZone5,
 	]
 	opponent_monster_zones = [
-		$SafeArea/Battlefield/OpponentMonsterRow/OpponentMonsterZone5,
-		$SafeArea/Battlefield/OpponentMonsterRow/OpponentMonsterZone4,
-		$SafeArea/Battlefield/OpponentMonsterRow/OpponentMonsterZone3,
-		$SafeArea/Battlefield/OpponentMonsterRow/OpponentMonsterZone2,
-		$SafeArea/Battlefield/OpponentMonsterRow/OpponentMonsterZone1,
+		$SafeArea/FieldStage/OpponentField/OpponentMonsterRow/OpponentMonsterZone5,
+		$SafeArea/FieldStage/OpponentField/OpponentMonsterRow/OpponentMonsterZone4,
+		$SafeArea/FieldStage/OpponentField/OpponentMonsterRow/OpponentMonsterZone3,
+		$SafeArea/FieldStage/OpponentField/OpponentMonsterRow/OpponentMonsterZone2,
+		$SafeArea/FieldStage/OpponentField/OpponentMonsterRow/OpponentMonsterZone1,
 	]
 	opponent_spell_zones = [
-		$SafeArea/Battlefield/OpponentSpellRow/OpponentSpellZone5,
-		$SafeArea/Battlefield/OpponentSpellRow/OpponentSpellZone4,
-		$SafeArea/Battlefield/OpponentSpellRow/OpponentSpellZone3,
-		$SafeArea/Battlefield/OpponentSpellRow/OpponentSpellZone2,
-		$SafeArea/Battlefield/OpponentSpellRow/OpponentSpellZone1,
+		$SafeArea/FieldStage/OpponentField/OpponentSpellRow/OpponentSpellZone5,
+		$SafeArea/FieldStage/OpponentField/OpponentSpellRow/OpponentSpellZone4,
+		$SafeArea/FieldStage/OpponentField/OpponentSpellRow/OpponentSpellZone3,
+		$SafeArea/FieldStage/OpponentField/OpponentSpellRow/OpponentSpellZone2,
+		$SafeArea/FieldStage/OpponentField/OpponentSpellRow/OpponentSpellZone1,
 	]
 	assert(player_monster_zones.size() == 5, "玩家怪兽区必须有五个原生卡位")
 	assert(player_spell_zones.size() == 5, "玩家魔陷区必须有五个原生卡位")

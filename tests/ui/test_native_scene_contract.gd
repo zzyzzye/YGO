@@ -110,7 +110,8 @@ func _run() -> void:
 	root.add_child(board)
 	await process_frame
 	for node_name in [
-		"Background", "SafeArea", "Battlefield", "OpponentHand",
+		"Background", "SafeArea", "FieldStage", "HandLayer", "HudLayer",
+		"OverlayLayer", "OpponentField", "PlayerField", "OpponentHand",
 		"OpponentSpellRow", "OpponentMonsterRow", "TurnLabel",
 		"PlayerMonsterRow", "PlayerSpellRow", "PlayerHand",
 		"OpponentStatusSurface", "OpponentStatus", "DirectAttackHighlight",
@@ -121,6 +122,35 @@ func _run() -> void:
 		if board.find_child(node_name, true, false) == null:
 			_fail("DuelBoard 缺少固定节点：" + node_name)
 			return
+	# 棋盘、手牌、HUD 与规则浮层必须是兄弟层。这样显示确认框或改变手牌数量
+	# 时不会参与四排场地的 Container 尺寸分配，场地几何才能保持稳定。
+	var safe_area: Control = board.find_child("SafeArea", true, false)
+	var field_stage: Control = board.find_child("FieldStage", true, false)
+	var hand_layer: Control = board.find_child("HandLayer", true, false)
+	var hud_layer: Control = board.find_child("HudLayer", true, false)
+	var overlay_layer: Control = board.find_child("OverlayLayer", true, false)
+	if (
+		field_stage.get_parent() != safe_area
+		or hand_layer.get_parent() != safe_area
+		or hud_layer.get_parent() != safe_area
+		or overlay_layer.get_parent() != safe_area
+	):
+		_fail("棋盘、手牌、HUD 与规则浮层必须是 SafeArea 下的独立兄弟层")
+		return
+	if (
+		board.find_child("PlayerHand", true, false).get_parent() != hand_layer
+		or board.find_child("OpponentHand", true, false).get_parent() != hand_layer
+		or board.find_child("PlayerMonsterRow", true, false).get_parent().name
+				!= "PlayerField"
+		or board.find_child("OpponentMonsterRow", true, false).get_parent().name
+				!= "OpponentField"
+		or board.find_child("PhaseButton", true, false).get_parent().name
+				!= "TurnPhaseHud"
+		or board.find_child("ConfirmationOverlay", true, false).get_parent()
+				!= overlay_layer
+	):
+		_fail("业务节点必须归属对应的场地、手牌、HUD 或浮层")
+		return
 	if board.theme == null or board.theme.resource_path != THEME_PATH:
 		_fail("DuelBoard 根节点必须直接应用决斗界面 Theme")
 		return
@@ -149,6 +179,7 @@ func _run() -> void:
 		false
 	)
 	var opponent_status: Label = board.find_child("OpponentStatus", true, false)
+	var player_status: Label = board.find_child("PlayerStatus", true, false)
 	var direct_attack_highlight: Panel = board.find_child(
 		"DirectAttackHighlight",
 		true,
@@ -166,6 +197,14 @@ func _run() -> void:
 		or direct_attack_highlight.theme_type_variation != &"DirectAttackTarget"
 	):
 		_fail("对手 LP 必须使用原生点击面及忽略输入的全尺寸直击高亮")
+		return
+	if (
+		opponent_status.theme_type_variation != &"HudStatus"
+		or player_status.theme_type_variation != &"HudStatus"
+		or !duel_theme.has_font_size(&"font_size", &"HudStatus")
+		or !duel_theme.has_color(&"font_color", &"HudStatus")
+	):
+		_fail("双方状态栏必须共同消费 HudStatus Theme 变体")
 		return
 	for type_mapping in [
 		[&"ZonePanel", &"PanelContainer"],
